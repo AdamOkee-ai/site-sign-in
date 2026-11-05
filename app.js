@@ -831,7 +831,7 @@ function renderFoot(){
   const ft=$("#foot"); if(!ft||!S.B) return;
   ft.replaceChildren();
   if(S.B.email) ft.append(h("span",{class:"muted small",text:"Signed in as "+S.B.email}),h("button",{class:"btn sm",onclick:()=>S.B.signOut()},"Sign out"));
-  else ft.append(h("button",{class:"btn sm",onclick:()=>S.B.signIn()},"Site team and supervisor sign-in"));
+  else ft.append(h("button",{class:"btn sm",onclick:()=>S.B.signIn()},"OKEE Site Team Sign-In"));
 }
 
 /* ---------- render ---------- */
