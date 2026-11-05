@@ -18,7 +18,7 @@ async function main() {
   const manual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
   const now = new Date();
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).format(now)) % 24;
-  const from = Number(process.env.REPORT_HOUR || 18);
+  const from = Number(process.env.REPORT_HOUR || 21);
   // the schedule fires a few times a day (to cover winter/summer time and dropped runs); only the first one inside the window sends
   if (!manual && (hour < from || hour >= from + 3)) { console.log('Not report time yet (London hour ' + hour + ', reports go out from ' + from + ':00). Nothing to do.'); return; }
 
