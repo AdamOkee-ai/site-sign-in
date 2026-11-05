@@ -1,6 +1,6 @@
 /* Site Sign-In offline layer: keeps the app, its libraries and fonts on the phone so it opens with weak signal.
    Site data is cached by Firestore; this file never touches it. Bump VERSION on every change. */
-const VERSION = 'si-2026-11-05-1';
+const VERSION = 'si-2026-11-05-2';
 const SHELL = ['./', 'index.html', 'app.js', 'db-adapter.js', 'firebase-shim.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 const FB = 'https://www.gstatic.com/firebasejs/10.14.1/';
 const CDN = [FB + 'firebase-app.js', FB + 'firebase-auth.js', FB + 'firebase-firestore.js',

@@ -19,6 +19,7 @@ It runs as a normal web page on GitHub Pages, with Firebase holding the data. It
 | `config.js` | Your Firebase project settings (not secret) |
 | `firebase/firestore.rules` | Security rules to paste into Firebase |
 | `sw.js` | Offline layer. **Bump `VERSION` on every change** so phones pick up the update |
+| `scripts/`, `.github/workflows/` | The end-of-day report email (see Daily report email) |
 
 ## One-off setup (about 20 minutes)
 
@@ -58,6 +59,19 @@ These limits are enforced by the Firebase rules, not just hidden in the screens.
 
 ## Keeping personal data out of GitHub
 The app contains no names. The people are held in Firebase and loaded through **Setup > Import people**. Keep `roster-import.json` on a company drive, not in this repository.
+
+## Daily report email
+Every day at 18:00 UK time, a GitHub job (`.github/workflows/daily-report.yml`) makes the day's attendance PDF for each project and emails it to every **OKEE site team** member who has not opted out. Nothing is sent on a day when nobody signed in. People with no time out are shown as "No time out" in the PDF, and can be fixed afterwards under Summary.
+
+**Opting out:** in the app, go to Setup > Supervisors and site team. Each site team member has a **Report: On / Off** button, and there is a **My daily report email** button for the person signed in. Supervisors do not get the report. Add yourself as site team there if you are the owner and want it.
+
+One-off setup (about 10 minutes):
+1. Firebase console > Project settings > **Service accounts** > **Generate new private key**. A `.json` file downloads.
+2. GitHub repository > Settings > Secrets and variables > Actions > **New repository secret**. Name: `FIREBASE_SERVICE_ACCOUNT`, value: the whole contents of that file. Then delete the file from your computer.
+3. Pick the mailbox the reports are sent from (for example a company mailbox) and add its details as secrets: `SMTP_HOST`, `SMTP_PORT` (587 if unsure), `SMTP_USER`, `SMTP_PASS`, and optionally `MAIL_FROM` (the "from" address, if different from the user). Google Workspace and Microsoft 365 both work but need an app password or SMTP sign-in switched on for that mailbox.
+4. To test, go to Actions > **Daily attendance report** > Run workflow, and put your own email in **Send only to this email address**. Nobody else is emailed. Leave it blank to send to everyone who has the report on.
+
+The send time is `REPORT_HOUR` in the workflow file (18 means 18:00). The job logs hold counts only, never names or email addresses, because this repository is public. GitHub pauses scheduled jobs in public repositories after 60 days with no changes to the repository; it emails you, and you switch it back on under Actions.
 
 ## Updating
 Change the files in the repository, **bump `VERSION` in `sw.js`**, and phones pick the new version up the next time they have signal.
