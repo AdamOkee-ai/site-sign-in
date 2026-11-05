@@ -1,0 +1,58 @@
+rules_version = '2';
+// Site Sign-In: Firestore security rules.
+// Paste into Firebase console -> Firestore Database -> Rules, then Publish.
+// Put the owner email (lower case) in siOwner() below. Owners are the OKEE site team and can add other people in the app.
+// Sharing a Firebase project with Site Safety Checks? Paste only the helper functions (they all start with "si") and the
+// five "match /si_..." blocks into that project's existing rules, inside its "match /databases/{database}/documents" block.
+// The two apps use different collection names, so they do not touch each other's data.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function siSignedIn() { return request.auth != null; }
+    function siVerified() { return siSignedIn() && request.auth.token.email != null && request.auth.token.email_verified == true; }
+    function siEmail() { return request.auth.token.email.lower(); }
+    function siOwner() { return siVerified() && siEmail() in ['you@example.com']; }
+    function siIsMember(r) {
+      return siVerified()
+        && exists(/databases/$(database)/documents/si_members/$(siEmail()))
+        && get(/databases/$(database)/documents/si_members/$(siEmail())).data.role == r;
+    }
+    function siSite() { return siOwner() || siIsMember('site'); }
+    function siSupervisor() { return siSite() || siIsMember('supervisor'); }
+    function siStr(v, lo, hi) { return v is string && v.size() >= lo && v.size() <= hi; }
+
+    // Projects and working areas: everyone reads, the site team changes.
+    match /si_config/{id} { allow read: if siSignedIn(); allow write: if siSite(); }
+
+    // Supervisors and site team (document id = their email, lower case).
+    match /si_members/{id} { allow read: if siSite() || (siVerified() && siEmail() == id); allow write: if siSite(); }
+
+    // Companies and their people.
+    match /si_roster/{id} { allow read: if siSignedIn(); allow write: if siSite(); }
+
+    // Daily sign-ins. Anyone on the app can sign themselves in and can set a time out once.
+    // Only supervisors can change other details, and only the site team can delete.
+    match /si_attendance/{id} {
+      allow read: if siSignedIn();
+      allow create: if siSupervisor() || (siSignedIn()
+        && request.resource.data.keys().hasOnly(['date', 'day', 'project', 'projectName', 'area', 'company', 'companyId', 'personId', 'name', 'role', 'walkIn', 'timeIn', 'timeOut', 'signedAt'])
+        && request.resource.data.keys().hasAll(['date', 'project', 'company', 'personId', 'name', 'timeIn', 'timeOut'])
+        && siStr(request.resource.data.date, 10, 10) && siStr(request.resource.data.project, 1, 60)
+        && siStr(request.resource.data.company, 1, 120) && siStr(request.resource.data.name, 3, 120)
+        && siStr(request.resource.data.personId, 1, 120) && siStr(request.resource.data.timeIn, 5, 5)
+        && request.resource.data.timeOut == ''
+        && id == request.resource.data.date + '_' + request.resource.data.project + '_' + request.resource.data.personId);
+      allow update: if siSupervisor() || (siSignedIn() && resource.data.timeOut == ''
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['timeOut', 'outAt'])
+        && siStr(request.resource.data.timeOut, 5, 5));
+      allow delete: if siSite();
+    }
+
+    // Signatures: anyone can add their own, but only supervisors can look at them.
+    match /si_sigs/{id} {
+      allow create: if siSignedIn() && request.resource.data.keys().hasOnly(['date', 'sig'])
+        && siStr(request.resource.data.date, 10, 10) && siStr(request.resource.data.sig, 2, 20000);
+      allow read: if siSupervisor();
+      allow update, delete: if siSite();
+    }
+  }
+}
