@@ -2,11 +2,11 @@ name: Daily attendance report
 
 on:
   schedule:
-    # Three runs a day so the report goes out at 18:00 UK time in both summer and winter, and a dropped run is caught by the next one.
-    # The script only sends from 18:00 to 20:59 London time, and only once a day.
-    - cron: '5 17 * * *'
-    - cron: '5 18 * * *'
-    - cron: '5 19 * * *'
+    # Three runs a day so the report goes out at 21:00 UK time in both summer and winter, and a dropped run is caught by the next one.
+    # The script only sends from 21:00 to 23:59 London time, and only once a day.
+    - cron: '5 20 * * *'
+    - cron: '5 21 * * *'
+    - cron: '5 22 * * *'
   workflow_dispatch:
     inputs:
       date:
@@ -47,5 +47,5 @@ jobs:
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
           REPORT_DATE: ${{ github.event.inputs.date }}
           TEST_TO: ${{ github.event.inputs.test_to }}
-          REPORT_HOUR: '18'
+          REPORT_HOUR: '21'
           TZ: Europe/London
