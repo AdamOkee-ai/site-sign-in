@@ -1,0 +1,51 @@
+name: Daily attendance report
+
+on:
+  schedule:
+    # Three runs a day so the report goes out at 18:00 UK time in both summer and winter, and a dropped run is caught by the next one.
+    # The script only sends from 18:00 to 20:59 London time, and only once a day.
+    - cron: '5 17 * * *'
+    - cron: '5 18 * * *'
+    - cron: '5 19 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Report date as YYYY-MM-DD (leave blank for today)'
+        required: false
+        default: ''
+      test_to:
+        description: 'Send only to this email address (a test). Leave blank to send to everyone who has the report switched on.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-attendance-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install report tools
+        run: npm install --no-save --no-package-lock --no-audit --no-fund firebase-admin@12.7.0 nodemailer@6.9.16 pdf-lib@1.17.1
+      - name: Make the PDFs and email the site team
+        run: node scripts/daily-report.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          REPORT_DATE: ${{ github.event.inputs.date }}
+          TEST_TO: ${{ github.event.inputs.test_to }}
+          REPORT_HOUR: '18'
+          TZ: Europe/London
