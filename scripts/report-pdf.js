@@ -9,11 +9,11 @@ const parseDate = s => { const [y, m, d] = s.split('-').map(Number); return new 
 const dayName = s => parseDate(s).toLocaleDateString('en-GB', { weekday: 'long' });
 const dateLong = s => parseDate(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
-function groupByCompany(rows) {
+function groupByCompany(rows, cmp) {
   const m = new Map();
   rows.forEach(r => { const k = r.company || 'Other'; if (!m.has(k)) m.set(k, []); m.get(k).push(r); });
   return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([name, rs]) => ({ name, rows: rs.sort((a, b) => cmpTime(a.timeIn, b.timeIn) || a.name.localeCompare(b.name)) }));
+    .map(([name, rs]) => ({ name, rows: rs.sort(cmp || ((a, b) => cmpTime(a.timeIn, b.timeIn) || a.name.localeCompare(b.name))) }));
 }
 
 /* o: { rows, sigs (map id -> stroke JSON string), projectName, date (YYYY-MM-DD), logo (PNG bytes or null), created ('HH:MM') } */
@@ -23,11 +23,16 @@ async function makePdf(L, o) {
   const doc = await PDFDocument.create();
   const fR = await doc.embedFont(StandardFonts.Helvetica), fB = await doc.embedFont(StandardFonts.HelveticaBold);
   const MM = 72 / 25.4, PW = 210, PH = 297;
-  const hasArea = rows.some(r => r.area);
+  const info = r => (o.people && o.people.get(r.companyId + '|' + r.personId)) || null;
+  const numOf = r => { const p = info(r); return p && p.n ? String(p.n) : ''; };
+  const parts = r => { const p = info(r); if (p && (p.f || p.l)) return [String(p.f || '').trim(), String(p.l || '').trim()]; const w = String(r.name || '').trim().split(/\s+/); return [w[0] || '', w.slice(1).join(' ')]; };
+  const cmp = o.sortBy === 'first' ? (a, b) => { const x = parts(a), y = parts(b); return x[0].localeCompare(y[0]) || x[1].localeCompare(y[1]); }
+    : o.sortBy === 'last' ? (a, b) => { const x = parts(a), y = parts(b); return x[1].localeCompare(y[1]) || x[0].localeCompare(y[0]); } : null;
+  const hasArea = rows.some(r => r.area), hasNum = rows.some(r => numOf(r));
   const M = 14, W = PW - 2 * M, RH = 11;
   const C = a => rgb(a[0] / 255, a[1] / 255, a[2] / 255);
   const INK = [20, 23, 27], RED = [225, 16, 10], GREY = [90, 98, 108], LINE = [211, 216, 222], WHITE = [255, 255, 255], PALE = [238, 240, 243];
-  const cols = [{ k: 'name', t: 'Name', w: 0 }, { k: 'role', t: 'Role', w: 20 }]
+  const cols = [{ k: 'name', t: 'Name', w: 0 }].concat(hasNum ? [{ k: 'num', t: 'No.', w: 12 }] : []).concat([{ k: 'role', t: 'Role', w: 20 }])
     .concat(hasArea ? [{ k: 'area', t: 'Area', w: 22 }] : [])
     .concat([{ k: 'in', t: 'In', w: 14 }, { k: 'out', t: 'Out', w: 14 }, { k: 'sig', t: 'Signature', w: 30 }]);
   cols[0].w = W - cols.reduce((n, c) => n + c.w, 0);
@@ -47,7 +52,7 @@ async function makePdf(L, o) {
   txt('DAILY SITE ATTENDANCE RECORD', M + 16, y + 6, 16, true, INK);
   txt(o.projectName + '   |   ' + dayName(date) + ' ' + dateLong(date), M + 16, y + 12.5, 10.5, false, GREY);
   y += 19; hline(M, M + W, y, RED, 2.2); y += 7;
-  const inN = rows.filter(r => !r.timeOut).length, groups = groupByCompany(rows);
+  const inN = rows.filter(r => !r.timeOut).length, groups = groupByCompany(rows, cmp);
   txt('Signed in: ' + rows.length + '      No time out: ' + inN + '      Signed out: ' + (rows.length - inN) + '      Companies: ' + groups.length, M, y, 10, true, INK);
   y += 6;
   const colHead = () => { rect(M, y, W, 7, PALE); cols.forEach((c, i) => txt(c.t.toUpperCase(), xs[i] + 1.5, y + 4.8, 8.5, true, GREY)); y += 7; };
@@ -73,7 +78,7 @@ async function makePdf(L, o) {
     g.rows.forEach(r => {
       if (y + RH > PH - 16) { pg = doc.addPage([PW * MM, PH * MM]); y = M; groupHead(g, true); }
       if (r.walkIn) anyWalk = true;
-      const vals = { name: fit(r.name + (r.walkIn ? ' *' : ''), cols[0].w), role: fit(r.role || '', 20), area: fit(r.area || '', 22), in: r.timeIn || '', out: r.timeOut || '-' };
+      const vals = { name: fit(r.name + (r.walkIn ? ' *' : ''), cols[0].w), num: fit(numOf(r), 12), role: fit(r.role || '', 20), area: fit(r.area || '', 22), in: r.timeIn || '', out: r.timeOut || '-' };
       cols.forEach((c, i) => { if (c.k !== 'sig') txt(vals[c.k], xs[i] + 1.5, y + 6.6, 9.5, false, (c.k === 'out' && !r.timeOut) ? RED : INK); });
       const si = cols.length - 1; sigDraw(sigs[r._id], xs[si] + 1.5, y + 1, cols[si].w - 3, RH - 2);
       hline(M, M + W, y + RH, LINE, 0.6); y += RH;

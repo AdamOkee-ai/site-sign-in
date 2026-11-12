@@ -32,14 +32,18 @@ async function main() {
   const sentRef = db.collection('si_config').doc('reportSent');
   if (!manual) { const s = await sentRef.get(); if (s.exists && s.data().date === date) { console.log('Already sent for ' + date + '. Nothing to do.'); return; } }
 
-  const [attSnap, sigSnap, memSnap, cfgSnap] = await Promise.all([
+  const [attSnap, sigSnap, memSnap, cfgSnap, rosSnap, repSnap] = await Promise.all([
     db.collection('si_attendance').where('date', '==', date).get(),
     db.collection('si_sigs').where('date', '==', date).get(),
     db.collection('si_members').get(),
-    db.collection('si_config').doc('projects').get()
+    db.collection('si_config').doc('projects').get(),
+    db.collection('si_roster').get(),
+    db.collection('si_config').doc('report').get()
   ]);
   const rows = attSnap.docs.map(d => ({ ...d.data(), _id: d.id }));
   const sigs = {}; sigSnap.docs.forEach(d => { sigs[d.id] = d.data().sig; });
+  const people = new Map(); rosSnap.docs.forEach(d => (d.data().people || []).forEach(p => people.set(d.id + '|' + p.id, p)));
+  const sortBy = repSnap.exists ? repSnap.data().sort : 'time';
   if (!rows.length) { console.log('Nobody signed in on ' + date + '. No report sent.'); return; }
 
   // site team members who have not turned the report off
@@ -57,7 +61,7 @@ async function main() {
   const created = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
   const files = [], lines = [];
   for (const p of projects) {
-    const pdf = await R.makePdf(PDFLib, { rows: p.rows, sigs, projectName: p.name, date, logo, created });
+    const pdf = await R.makePdf(PDFLib, { rows: p.rows, sigs, projectName: p.name, date, logo, created, people, sortBy });
     files.push({ filename: 'site-attendance-' + p.name.replace(/[^A-Za-z0-9_-]+/g, '-') + '-' + date + '.pdf', content: Buffer.from(pdf), contentType: 'application/pdf' });
     const open = p.rows.filter(r => !r.timeOut).length;
     lines.push({ name: p.name, signed: p.rows.length, open, out: p.rows.length - open, companies: new Set(p.rows.map(r => r.company)).size });
