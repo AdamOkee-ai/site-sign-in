@@ -42,7 +42,7 @@ const S={
   canWrite:true,isAdmin:false,
   today:todayStr(),date:todayStr(),
   tab:"sign",
-  members:[],isSuper:false,sigs:{},B:null,
+  members:[],isSuper:false,sigs:{},B:null,sortBy:"time",
   projects:[],project:null,mode:"in",view:"",
   openAll:[],muster:new Set(),onData:null,
   roster:[],        // companies [{id,name,order,people:[]}]
@@ -89,10 +89,20 @@ function projBar(){
   const mk=(id,label)=>h("button",{"aria-pressed":String(v===id),onclick:()=>{S.view=id;render();}},label);
   return h("div",{class:"seg",role:"group","aria-label":"Project"},mk("all","All projects"),...S.projects.map(p=>mk(p.id,p.name)));
 }
+function personOf(r){const co=S.roster.find(c=>c.id===r.companyId); return (co&&co.people.find(p=>p.id===r.personId))||null;}
+const numOf=r=>{const p=personOf(r); return p&&p.n?String(p.n):"";};
+const numTag=p=>p&&p.n?h("span",{class:"tag",text:"No. "+p.n}):null;
+function nameParts(r){const p=personOf(r); if(p&&(p.f||p.l)) return [String(p.f||"").trim(),String(p.l||"").trim()]; const w=String(r.name||"").trim().split(/\s+/); return [w[0]||"",w.slice(1).join(" ")];}
+function cmpName(a,b){
+  const x=nameParts(a), y=nameParts(b);
+  if(S.sortBy==="first") return x[0].localeCompare(y[0])||x[1].localeCompare(y[1]);
+  if(S.sortBy==="last") return x[1].localeCompare(y[1])||x[0].localeCompare(y[0]);
+  return cmpTime(a.timeIn,b.timeIn)||a.name.localeCompare(b.name);
+}
 function groupByCompany(rows){
   const m=new Map();
   rows.forEach(r=>{const k=r.company||"Other";if(!m.has(k))m.set(k,[]);m.get(k).push(r);});
-  return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([name,rows])=>({name,rows:rows.sort((a,b)=>cmpTime(a.timeIn,b.timeIn)||a.name.localeCompare(b.name))}));
+  return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([name,rows])=>({name,rows:rows.sort(cmpName)}));
 }
 
 /* ---------- signature ---------- */
@@ -189,7 +199,7 @@ function sheetSignIn(opts){
     const err=h("div",{class:"err",role:"alert"});
     const go=h("button",{class:"btn primary",id:"goIn"},"Sign in");
     sheet.append(...[
-      h("h2",null,walk?"Not on the list":fullName(p),h("small",null,walk?"Add your details and sign in to "+proj.name+".":(proj.name+"  ·  "+opts.company+(p.r?"  ·  "+p.r:"")))),
+      h("h2",null,walk?"Not on the list":fullName(p),h("small",null,walk?"Add your details and sign in to "+proj.name+".":(proj.name+"  ·  "+opts.company+(p.r?"  ·  "+p.r:"")+(p.n?"  ·  No. "+p.n:"")))),
       walk?h("div",{style:"display:grid;gap:12px"},
         h("label",{class:"f",for:"wf"},"First name",first),
         h("label",{class:"f",for:"wl"},"Surname",last),
@@ -302,7 +312,7 @@ function renderSign(){
       const wrap=h("div",{class:"list"});
       ppl.forEach(p=>{
         const r=recFor(p.id);
-        const meta=h("div",{class:"meta"},p.r?h("span",{class:"tag",text:p.r}):null);
+        const meta=h("div",{class:"meta"},p.r?h("span",{class:"tag",text:p.r}):null,numTag(p));
         let right;
         if(!r) right=h("span",{class:"pill out",text:"Tap to sign in"});
         else if(!r.timeOut) right=h("span",{class:"pill in",text:"In "+r.timeIn+" · sign out"});
@@ -389,7 +399,7 @@ function renderList(){
         if(S.isAdmin) actions.push(h("button",{class:"btn sm danger",onclick:()=>confirmDelete(r)},"Delete"));
         list.append(h("div",{class:"person",style:"flex-wrap:wrap"},
           h("div",{class:"who"},h("div",{class:"nm",text:r.name}),
-            h("div",{class:"meta"},r.role?h("span",{class:"tag",text:r.role}):null,r.walkIn?h("span",{class:"tag",text:"Not on list"}):null,viewId()==="all"&&r.project?h("span",{class:"tag",text:r.projectName||projName(r.project)}):null,r.area?h("span",{class:"tag",text:r.area}):null)),
+            h("div",{class:"meta"},numOf(r)?h("span",{class:"tag",text:"No. "+numOf(r)}):null,r.role?h("span",{class:"tag",text:r.role}):null,r.walkIn?h("span",{class:"tag",text:"Not on list"}):null,viewId()==="all"&&r.project?h("span",{class:"tag",text:r.projectName||projName(r.project)}):null,r.area?h("span",{class:"tag",text:r.area}):null)),
           h("div",{style:"display:flex;flex-direction:column;align-items:flex-end;gap:4px"},
             h("span",{class:"pill "+(r.timeOut?"out":"in"),text:r.timeOut?"Out":"On site"}),
             h("span",{class:"times",text:r.timeIn+" – "+(r.timeOut||"…")})),
@@ -427,7 +437,7 @@ function rollRows(){return viewRows().filter(r=>!r.timeOut&&r.date===S.today);}
 function rollText(){
   const rows=rollRows(); const v=viewId();
   const lines=["EMERGENCY ROLL CALL","Okee Electrics - "+(v==="all"?"All projects":projName(v))+" - "+dateLong(S.today)+" "+nowHM(),"On site now: "+rows.length,""];
-  groupByCompany(rows).forEach(g=>{lines.push(g.name.toUpperCase()+" ("+g.rows.length+")");g.rows.forEach(r=>lines.push("  [ ] "+r.name+(r.area?" ("+r.area+")":"")+"  in "+r.timeIn));lines.push("");});
+  groupByCompany(rows).forEach(g=>{lines.push(g.name.toUpperCase()+" ("+g.rows.length+")");g.rows.forEach(r=>lines.push("  [ ] "+r.name+(numOf(r)?" (No. "+numOf(r)+")":"")+(r.area?" ("+r.area+")":"")+"  in "+r.timeIn));lines.push("");});
   return lines.join("\n");
 }
 function openRollCall(){
@@ -470,11 +480,11 @@ async function makePdfBytes(){
   const doc=await PDFDocument.create();
   const fR=await doc.embedFont(StandardFonts.Helvetica), fB=await doc.embedFont(StandardFonts.HelveticaBold);
   const MM=72/25.4, PW=210, PH=297;
-  const rows=att(), v=viewId(), showProj=v==="all", hasArea=rows.some(r=>r.area);
+  const rows=att(), v=viewId(), showProj=v==="all", hasArea=rows.some(r=>r.area), hasNum=rows.some(r=>numOf(r));
   const M=14,W=PW-2*M,RH=11;
   const C=(a)=>rgb(a[0]/255,a[1]/255,a[2]/255);
   const INK=[20,23,27],RED=[225,16,10],GREY=[90,98,108],LINE=[211,216,222],WHITE=[255,255,255],PALE=[238,240,243];
-  const cols=[{k:"name",t:"Name",w:0},{k:"role",t:"Role",w:20}].concat(hasArea?[{k:"area",t:"Area",w:22}]:[]).concat(showProj?[{k:"proj",t:"Project",w:18}]:[]).concat([{k:"in",t:"In",w:14},{k:"out",t:"Out",w:14},{k:"sig",t:"Signature",w:30}]);
+  const cols=[{k:"name",t:"Name",w:0}].concat(hasNum?[{k:"num",t:"No.",w:12}]:[]).concat([{k:"role",t:"Role",w:20}]).concat(hasArea?[{k:"area",t:"Area",w:22}]:[]).concat(showProj?[{k:"proj",t:"Project",w:18}]:[]).concat([{k:"in",t:"In",w:14},{k:"out",t:"Out",w:14},{k:"sig",t:"Signature",w:30}]);
   cols[0].w=W-cols.reduce((n,c)=>n+c.w,0);
   const xs=[];let xx=M;cols.forEach(c=>{xs.push(xx);xx+=c.w;});
   let pg=doc.addPage([PW*MM,PH*MM]), y=M;
@@ -521,7 +531,7 @@ async function makePdfBytes(){
     g.rows.forEach(r=>{
       if(y+RH>PH-16){pg=doc.addPage([PW*MM,PH*MM]);y=M;groupHead(g,true);}
       if(r.walkIn) anyWalk=true;
-      const vals={name:fit(r.name+(r.walkIn?" *":""),cols[0].w),role:fit(r.role||"",20),area:fit(r.area||"",22),proj:fit(r.projectName||projName(r.project),18),in:r.timeIn||"",out:r.timeOut||"-"};
+      const vals={name:fit(r.name+(r.walkIn?" *":""),cols[0].w),num:fit(numOf(r),12),role:fit(r.role||"",20),area:fit(r.area||"",22),proj:fit(r.projectName||projName(r.project),18),in:r.timeIn||"",out:r.timeOut||"-"};
       cols.forEach((c,i)=>{ if(c.k!=="sig") txt(vals[c.k],xs[i]+1.5,y+6.6,9.5,false,(c.k==="out"&&!r.timeOut)?RED:INK); });
       const si=cols.length-1; sigDraw(S.sigs[r._id],xs[si]+1.5,y+1,cols[si].w-3,RH-2);
       hline(M,M+W,y+RH,LINE,0.6); y+=RH;
@@ -542,16 +552,16 @@ function summaryText(){
   lines.push("");
   groupByCompany(rows).forEach(g=>{
     lines.push(g.name.toUpperCase()+" ("+g.rows.length+")");
-    g.rows.forEach(r=>lines.push("  "+r.name+(r.area?" ("+r.area+")":"")+(viewId()==="all"&&r.projectName?" {"+r.projectName+"}":"")+"  "+r.timeIn+" - "+(r.timeOut||"not signed out")));
+    g.rows.forEach(r=>lines.push("  "+r.name+(numOf(r)?" (No. "+numOf(r)+")":"")+(r.area?" ("+r.area+")":"")+(viewId()==="all"&&r.projectName?" {"+r.projectName+"}":"")+"  "+r.timeIn+" - "+(r.timeOut||"not signed out")));
     lines.push("");
   });
   return lines.join("\n");
 }
 function csvText(){
   const esc=v=>{v=String(v==null?"":v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
-  const head=["Date","Day","Project","Area","Company","Name","Role","Time in","Time out","Not on roster"];
+  const head=["Date","Day","Project","Area","Company","Name","Clock no.","Role","Time in","Time out","Not on roster"];
   const out=[head.map(esc).join(",")];
-  groupByCompany(att()).forEach(g=>g.rows.forEach(r=>out.push([r.date,r.day,r.projectName||projName(r.project),r.area||"",r.company,r.name,r.role,r.timeIn,r.timeOut,r.walkIn?"Yes":""].map(esc).join(","))));
+  groupByCompany(att()).forEach(g=>g.rows.forEach(r=>out.push([r.date,r.day,r.projectName||projName(r.project),r.area||"",r.company,r.name,numOf(r),r.role,r.timeIn,r.timeOut,r.walkIn?"Yes":""].map(esc).join(","))));
   return "﻿"+out.join("\r\n");
 }
 function renderSummary(){
@@ -613,6 +623,9 @@ function renderSummary(){
       S.downloads?h("button",{class:"btn",onclick:async()=>{
         try{await S.downloads.save({filename:"site-attendance-"+(viewId()==="all"?"all":projName(viewId()))+"-"+S.date+".csv",data:csvText()});}
         catch(e){if(!e||e.code!=="declined")toast("Could not create the file.");}}},"Download CSV"):null);
+    pane.append(h("div",{class:"row",style:"align-items:center;gap:10px"},h("span",{class:"muted small",text:"Sort names in each company by"}),
+      h("div",{class:"seg",role:"group","aria-label":"Sort names by"},...[["time","Time in"],["first","First name"],["last","Surname"]].map(([id,label])=>
+        h("button",{"aria-pressed":String(S.sortBy===id),onclick:()=>{S.sortBy=id;render();safeWrite(()=>S.db.doc("config/report").set({sort:id}));}},label)))));
     pane.append(act);
   }
 }
@@ -630,17 +643,18 @@ function renderSetup(){
   const pane=$("#pane-setup"); pane.replaceChildren();
   pane.append(h("h2",null,"Setup"));
   pane.append(projectsCard());
-  pane.append(accessCard(), membersCard(), importCard());
+  pane.append(accessCard(), membersCard(), importCard(), numbersCard());
   const box=h("div",{class:"card"});
   S.roster.forEach(co=>{
     const nf=h("input",{type:"text",placeholder:"First name","aria-label":"First name"});
     const nl=h("input",{type:"text",placeholder:"Surname","aria-label":"Surname"});
     const nr=h("input",{type:"text",placeholder:"Role (optional)","aria-label":"Role",style:"grid-column:1/-1"});
+    const nn=h("input",{type:"text",placeholder:"Clock number (optional)","aria-label":"Clock number",inputmode:"numeric",autocomplete:"off",style:"grid-column:1/-1"});
     const people=h("div");
     const sq=h("input",{type:"search",placeholder:"Search "+co.name+" people","aria-label":"Search "+co.name+" people",autocomplete:"off"});
     sq.addEventListener("input",()=>{const t=sq.value.trim().toLowerCase();people.querySelectorAll(".rrow").forEach(r=>{r.hidden=!!t&&!r.dataset.n.includes(t);});});
     co.people.slice().sort((a,b)=>fullName(a).localeCompare(fullName(b))).forEach(p=>{
-      people.append(h("div",{class:"rrow","data-n":fullName(p).toLowerCase()},h("span",null,fullName(p),p.r?" ":"",p.r?h("span",{class:"tag",text:p.r}):null),
+      people.append(h("div",{class:"rrow","data-n":fullName(p).toLowerCase()},h("span",null,fullName(p),p.r?" ":"",p.r?h("span",{class:"tag",text:p.r}):null,p.n?" ":"",numTag(p)),
         h("button",{class:"btn sm",onclick:()=>sheetEditPerson(co.id,p.id),"aria-label":"Edit "+fullName(p)},"Edit")));
     });
     box.append(h("details",{class:"co","data-id":co.id},
@@ -648,11 +662,11 @@ function renderSetup(){
       h("div",{class:"inner"},
         h("div",{class:"row",style:"justify-content:space-between"},h("b",null,"Add a person"),
           h("button",{class:"btn sm",onclick:()=>sheetRenameCompany(co.id)},"Rename company")),
-        h("div",{style:"display:grid;gap:8px;grid-template-columns:1fr 1fr"},nf,nl,nr),
+        h("div",{style:"display:grid;gap:8px;grid-template-columns:1fr 1fr"},nf,nl,nr,nn),
         h("button",{class:"btn sm primary",onclick:async()=>{
           const f=nf.value.trim(),l=nl.value.trim(); if(!f||!l){toast("Enter a first name and surname.");return;}
           const cur=coById(co.id); if(!cur)return;
-          const p={id:"n"+Date.now().toString(36),f,l,r:nr.value.trim()};
+          const p={id:"n"+Date.now().toString(36),f,l,r:nr.value.trim(),n:nn.value.trim()};
           await safeWrite(()=>S.db.doc("roster/"+co.id).update({people:cur.people.concat([p])}),"Added "+fullName(p));
         }},"Add person"),
         co.people.length>8?sq:null,
@@ -675,17 +689,18 @@ function sheetEditPerson(coId,pid){
     const f=h("input",{type:"text",id:"ef",value:p0.f||"",autocomplete:"off"});
     const l=h("input",{type:"text",id:"el",value:p0.l||"",autocomplete:"off"});
     const r=h("input",{type:"text",id:"er",value:p0.r||"",autocomplete:"off",placeholder:"e.g. GO, SPK, Spotter"});
+    const n=h("input",{type:"text",id:"en",value:p0.n||"",autocomplete:"off",inputmode:"numeric",placeholder:"Optional"});
     const err=h("div",{class:"err",role:"alert"});
     const save=h("button",{class:"btn primary"},"Save changes");
     const del=h("button",{class:"btn danger"},"Remove person");
     sheet.append(h("h2",null,"Edit person",h("small",null,co0.name)),
-      h("label",{class:"f",for:"ef"},"First name",f),h("label",{class:"f",for:"el"},"Surname",l),h("label",{class:"f",for:"er"},"Role (optional)",r),err,
+      h("label",{class:"f",for:"ef"},"First name",f),h("label",{class:"f",for:"el"},"Surname",l),h("label",{class:"f",for:"er"},"Role (optional)",r),h("label",{class:"f",for:"en"},"Clock number",n),err,
       h("div",{class:"row",style:"justify-content:space-between"},del,h("div",{class:"row"},h("button",{class:"btn",onclick:close},"Cancel"),save)));
     save.addEventListener("click",async()=>{
       const fv=f.value.trim(),lv=l.value.trim(); if(!fv||!lv){err.textContent="Enter a first name and surname.";return;}
       const cur=coById(coId); if(!cur){close();return;}
       save.disabled=true;
-      const ok=await safeWrite(()=>S.db.doc("roster/"+coId).update({people:cur.people.map(x=>x.id===pid?{...x,f:fv,l:lv,r:r.value.trim()}:x)}),"Saved "+fv+" "+lv);
+      const ok=await safeWrite(()=>S.db.doc("roster/"+coId).update({people:cur.people.map(x=>x.id===pid?{...x,f:fv,l:lv,r:r.value.trim(),n:n.value.trim()}:x)}),"Saved "+fv+" "+lv);
       if(ok) close(); else save.disabled=false;
     });
     let armed=false;
@@ -754,7 +769,17 @@ function accessCard(){
     h("h3",null,"Who can do what"),
     h("div",{class:"small"},h("b",null,"Contractors: "),"just open the link on their phone. No account. They see Sign in only."),
     h("div",{class:"small"},h("b",null,"Supervisors: "),"sign in with Google or email (link at the bottom of the page) once you add their email below. They also see On site and can sign people out."),
-    h("div",{class:"small"},h("b",null,"OKEE site team: "),"added below as site team, or listed as an owner in the security rules. They see everything, including Summary and Setup."));
+    h("div",{class:"small"},h("b",null,"OKEE site team: "),"added below as site team, or listed as an owner in the security rules. They see everything, including Summary and Setup. Site team can change anyone's level below."));
+}
+function roleBtn(m){
+  const to=m.role==="site"?"supervisor":"site";
+  const label=to==="site"?"Make site team":"Make supervisor";
+  const b=h("button",{class:"btn sm",onclick:()=>{
+    if(!b.dataset.armed){b.dataset.armed="1";b.textContent="Tap again to confirm";setTimeout(()=>{if(b.isConnected){delete b.dataset.armed;b.textContent=label;}},4000);return;}
+    b.disabled=true;
+    safeWrite(()=>S.db.doc("members/"+m.id).update({role:to}),m.id+" is now "+(to==="site"?"OKEE site team":"a supervisor")).then(ok=>{if(!ok)b.disabled=false;});
+  }},label);
+  return b;
 }
 function membersCard(){
   const card=h("div",{class:"card pad",style:"display:grid;gap:10px"});
@@ -768,6 +793,7 @@ function membersCard(){
     h("span",null,m.id," ",h("span",{class:"tag",text:m.role==="site"?"Site team":"Supervisor"})),
     h("div",{class:"row"},
       m.role==="site"?h("button",{class:"btn sm","aria-pressed":String(m.reports!==false),onclick:()=>safeWrite(()=>S.db.doc("members/"+m.id).update({reports:m.reports===false}),m.reports===false?"Daily report turned on for "+m.id:"Daily report turned off for "+m.id)},m.reports===false?"Report: Off":"Report: On"):null,
+      m.id===me?h("span",{class:"muted small",text:"You"}):roleBtn(m),
       h("button",{class:"btn sm danger",onclick:()=>safeWrite(()=>S.db.doc("members/"+m.id).delete(),"Removed "+m.id)},"Remove")))));
   const em=h("input",{type:"email",id:"memail",placeholder:"Their email address","aria-label":"Email address",autocomplete:"off",inputmode:"email"});
   const rl=h("select",{id:"mrole","aria-label":"Level"},h("option",{value:"supervisor"},"Supervisor"),h("option",{value:"site"},"OKEE site team"));
@@ -796,7 +822,7 @@ async function importRoster(list){
     const seen=new Set(cur?cur.people.map(p=>fullName(p).toLowerCase()):[]);
     const fresh=[];
     c.people.forEach((p,i)=>{const f=String(p.f||"").trim(),l=String(p.l||"").trim(); if(!f||!l)return; const k=(f+" "+l).toLowerCase(); if(seen.has(k))return; seen.add(k);
-      fresh.push({id:"i"+Date.now().toString(36)+"-"+fresh.length+"-"+i,f,l,r:String(p.r||"").trim()});});
+      fresh.push({id:"i"+Date.now().toString(36)+"-"+fresh.length+"-"+i,f,l,r:String(p.r||"").trim(),n:String(p.n==null?"":p.n).trim()});});
     if(!fresh.length) continue;
     const ok=cur?await safeWrite(()=>S.db.doc("roster/"+id).update({people:cur.people.concat(fresh)})):await safeWrite(()=>S.db.doc("roster/"+id).set({name:c.name,order:S.roster.length+created+1,people:fresh}));
     if(!ok) return toast("Import stopped. "+added+" people were added first.");
@@ -821,6 +847,40 @@ function importCard(){
       const list=parseLines(ta.value); if(!list.length){toast("Nothing to import. Use: Company, First Surname");return;}
       await importRoster(list); ta.value="";}},"Import list")));
   return card;
+}
+async function applyNumbers(list){
+  let set=0; const miss=[];
+  const key=(f,l)=>(String(f||"")+" "+String(l||"")).replace(/\s+/g," ").trim().toLowerCase();
+  for(const c of list){
+    if(!c||!c.name||!Array.isArray(c.people)) continue;
+    const cur=S.roster.find(x=>x.id===slug(c.name))||S.roster.find(x=>String(x.name).trim().toLowerCase()===String(c.name).trim().toLowerCase());
+    if(!cur){c.people.forEach(p=>{if(String(p.n==null?"":p.n).trim()) miss.push(c.name+": "+fullName(p));}); continue;}
+    const byName=new Map(cur.people.map(p=>[key(p.f,p.l),p]));
+    const nums=new Map();
+    c.people.forEach(p=>{
+      const n=String(p.n==null?"":p.n).trim(); if(!n) return;
+      const m=byName.get(key(p.f,p.l)); if(!m){miss.push(c.name+": "+fullName(p));return;}
+      if(String(m.n||"")!==n) nums.set(m.id,n);
+    });
+    if(!nums.size) continue;
+    const ok=await safeWrite(()=>S.db.doc("roster/"+cur.id).update({people:cur.people.map(p=>nums.has(p.id)?{...p,n:nums.get(p.id)}:p)}));
+    if(!ok) return toast("Stopped. "+set+" numbers were added first.");
+    set+=nums.size;
+  }
+  toast(set+" clock "+(set===1?"number":"numbers")+" added"+(miss.length?". "+miss.length+" not matched.":"."));
+  if(miss.length) showText("Not matched (check the spelling in Setup):\n"+miss.join("\n"));
+}
+function numbersCard(){
+  const file=h("input",{type:"file",accept:".json,application/json","aria-label":"Choose a clock numbers file"});
+  return h("div",{class:"card pad",style:"display:grid;gap:10px"},
+    h("h3",null,"Import clock numbers"),
+    h("div",{class:"muted small"},"Adds a clock number to people already on the roster, matched by company and name. Numbers can also be typed in by tapping Edit on a person below."),
+    h("label",{class:"f"},"Clock numbers file (.json)",file),
+    h("div",{class:"row end"},h("button",{class:"btn sm primary",onclick:async()=>{
+      const f=file.files&&file.files[0]; if(!f){toast("Choose a file first.");return;}
+      let data; try{data=JSON.parse(await f.text());}catch(e){toast("That file could not be read.");return;}
+      if(!Array.isArray(data)){toast("That file is not a clock numbers list.");return;}
+      await applyNumbers(data); file.value="";}},"Import numbers")));
 }
 function confirmRemoveCompany(co){
   openSheet((sheet,close)=>{
@@ -893,6 +953,9 @@ function subscribe(){
   S.db.doc("config/projects").onSnapshot(snap=>{
     S.projects=(snap.exists&&Array.isArray(snap.data().list))?snap.data().list:[];
     S.loaded.projects=true; render(true);
+  },()=>{});
+  S.db.doc("config/report").onSnapshot(snap=>{
+    const s=snap.exists?snap.data().sort:""; S.sortBy=(s==="first"||s==="last")?s:"time"; render(true);
   },()=>{});
   subscribeAtt();
 }
