@@ -334,10 +334,7 @@ function renderSign(){
         h("h3",null,co.name),h("span",{class:"muted small",text:inCount+" of "+co.people.length+" signed in"})),
       q,listBox);
   }
-  pane.append(h("button",{class:"btn",onclick:()=>{
-      if(!S.canWrite){toast("Read only.");return;}
-      sheetSignIn({company:co?co.name:"",companyId:co?co.id:"",person:null});
-    }},"My name is not on the list"));
+  pane.append(h("p",{class:"muted small",style:"text-align:center;margin:14px 0 0"},"Can't find your name? Ask the site team to add you."));
 }
 function renderSignOut(pane){
   const here=S.att.filter(a=>a.project===S.project&&!a.timeOut).sort((a,b)=>a.name.localeCompare(b.name));
@@ -690,17 +687,28 @@ function sheetEditPerson(coId,pid){
     const l=h("input",{type:"text",id:"el",value:p0.l||"",autocomplete:"off"});
     const r=h("input",{type:"text",id:"er",value:p0.r||"",autocomplete:"off",placeholder:"e.g. GO, SPK, Spotter"});
     const n=h("input",{type:"text",id:"en",value:p0.n||"",autocomplete:"off",inputmode:"numeric",placeholder:"Optional"});
+    const coSel=h("select",{id:"eco"},...S.roster.map(c=>h("option",{value:c.id,selected:c.id===coId},c.name)));
     const err=h("div",{class:"err",role:"alert"});
     const save=h("button",{class:"btn primary"},"Save changes");
     const del=h("button",{class:"btn danger"},"Remove person");
     sheet.append(h("h2",null,"Edit person",h("small",null,co0.name)),
-      h("label",{class:"f",for:"ef"},"First name",f),h("label",{class:"f",for:"el"},"Surname",l),h("label",{class:"f",for:"er"},"Role (optional)",r),h("label",{class:"f",for:"en"},"Clock number",n),err,
+      h("label",{class:"f",for:"ef"},"First name",f),h("label",{class:"f",for:"el"},"Surname",l),h("label",{class:"f",for:"er"},"Role (optional)",r),h("label",{class:"f",for:"en"},"Clock number",n),h("label",{class:"f",for:"eco"},"Company",coSel),err,
       h("div",{class:"row",style:"justify-content:space-between"},del,h("div",{class:"row"},h("button",{class:"btn",onclick:close},"Cancel"),save)));
     save.addEventListener("click",async()=>{
       const fv=f.value.trim(),lv=l.value.trim(); if(!fv||!lv){err.textContent="Enter a first name and surname.";return;}
       const cur=coById(coId); if(!cur){close();return;}
       save.disabled=true;
-      const ok=await safeWrite(()=>S.db.doc("roster/"+coId).update({people:cur.people.map(x=>x.id===pid?{...x,f:fv,l:lv,r:r.value.trim(),n:n.value.trim()}:x)}),"Saved "+fv+" "+lv);
+      const upd={...p0,f:fv,l:lv,r:r.value.trim(),n:n.value.trim()};
+      const toId=coSel.value;
+      if(toId!==coId){
+        const dest=coById(toId); if(!dest){err.textContent="That company no longer exists.";save.disabled=false;return;}
+        let ok=true;
+        if(!dest.people.some(x=>x.id===pid)) ok=await safeWrite(()=>S.db.doc("roster/"+toId).update({people:dest.people.concat([upd])}),"Added "+fv+" "+lv+" to "+dest.name);
+        if(ok) ok=await safeWrite(()=>S.db.doc("roster/"+coId).update({people:cur.people.filter(x=>x.id!==pid)}),"Moved "+fv+" "+lv+" to "+dest.name);
+        if(ok) close(); else save.disabled=false;
+        return;
+      }
+      const ok=await safeWrite(()=>S.db.doc("roster/"+coId).update({people:cur.people.map(x=>x.id===pid?upd:x)}),"Saved "+fv+" "+lv);
       if(ok) close(); else save.disabled=false;
     });
     let armed=false;
