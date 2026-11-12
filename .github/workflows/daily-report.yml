@@ -13,10 +13,6 @@ on:
         description: 'Report date as YYYY-MM-DD (leave blank for today)'
         required: false
         default: ''
-      test_to:
-        description: 'Send only to this email address (a test). Leave blank to send to everyone who has the report switched on.'
-        required: false
-        default: ''
 
 permissions:
   contents: read
@@ -35,17 +31,12 @@ jobs:
         with:
           node-version: '20'
       - name: Install report tools
-        run: npm install --no-save --no-package-lock --no-audit --no-fund firebase-admin@12.7.0 nodemailer@6.9.16 pdf-lib@1.17.1
-      - name: Make the PDFs and email the site team
+        run: npm install --no-save --no-package-lock --no-audit --no-fund firebase-admin@12.7.0 pdf-lib@1.17.1
+      - name: Make the PDFs and send them to SharePoint
         run: node scripts/daily-report.js
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          SHAREPOINT_FLOW_URL: ${{ secrets.SHAREPOINT_FLOW_URL }}
           REPORT_DATE: ${{ github.event.inputs.date }}
-          TEST_TO: ${{ github.event.inputs.test_to }}
           REPORT_HOUR: '21'
           TZ: Europe/London
