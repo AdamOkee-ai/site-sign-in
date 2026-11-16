@@ -37,11 +37,16 @@ async function main() {
     db.collection('si_roster').get(),
     db.collection('si_config').doc('report').get()
   ]);
-  // REPORT_PROJECTS (set in the workflow) limits the report to those projects, e.g. 'HEL16'; leave it blank for all projects
+  // REPORT_PROJECTS (set in the workflow) lists the projects sent to the main flow SHAREPOINT_FLOW_URL (HEL16 folder), e.g. 'HEL16'; blank means all projects.
+  // A project with its own flow secret SHAREPOINT_FLOW_URL_<PROJECT> (e.g. SHAREPOINT_FLOW_URL_HEL17) goes to that flow instead, which saves it in that project's folder.
   const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const only = (process.env.REPORT_PROJECTS || '').split(',').map(norm).filter(Boolean);
-  if (only.length) console.log('Only reporting: ' + only.join(', '));
-  const rows = attSnap.docs.map(d => ({ ...d.data(), _id: d.id })).filter(r => !only.length || only.includes(norm(r.projectName)) || only.includes(norm(r.project)));
+  const ownUrl = r => process.env['SHAREPOINT_FLOW_URL_' + norm(r.projectName)] || process.env['SHAREPOINT_FLOW_URL_' + norm(r.project)] || '';
+  const wanted = r => !!ownUrl(r) || !only.length || only.includes(norm(r.projectName)) || only.includes(norm(r.project));
+  const allRows = attSnap.docs.map(d => ({ ...d.data(), _id: d.id }));
+  const skipped = [...new Set(allRows.filter(r => !wanted(r)).map(r => r.projectName || r.project || 'unknown'))];
+  if (skipped.length) console.log('Not sent (no SharePoint folder set up for it): ' + skipped.join(', '));
+  const rows = allRows.filter(wanted);
   const sigs = {}; sigSnap.docs.forEach(d => { sigs[d.id] = d.data().sig; });
   const people = new Map(); rosSnap.docs.forEach(d => (d.data().people || []).forEach(p => people.set(d.id + '|' + p.id, p)));
   const sortBy = repSnap.exists ? repSnap.data().sort : 'time';
@@ -59,19 +64,19 @@ async function main() {
     const pdf = await R.makePdf(PDFLib, { rows: p.rows, sigs, projectName: p.name, date, logo, created, people, sortBy });
     // a manual run adds the time to the name, because SharePoint will not overwrite a file that is already there
     const filename = 'site-attendance-' + p.name.replace(/[^A-Za-z0-9_-]+/g, '-') + '-' + date + (manual ? '-rerun-' + created.replace(':', '') : '') + '.pdf';
-    files.push({ filename, project: p.name, content: Buffer.from(pdf) });
+    files.push({ filename, project: p.name, content: Buffer.from(pdf), url: ownUrl(p.rows[0]) });
     const open = p.rows.filter(r => !r.timeOut).length;
     console.log('Report ' + date + ' ' + p.name + ': ' + p.rows.length + ' signed in, ' + open + ' with no time out.');
   }
 
   // post each PDF to the Power Automate flow (the web address is a secret: it works like a password)
-  const url = need('SHAREPOINT_FLOW_URL');
+  const mainUrl = files.some(f => !f.url) ? need('SHAREPOINT_FLOW_URL') : '';
   let sent = 0, failed = 0;
   for (const f of files) {
     let ok = false, status = 0;
     for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
       try {
-        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: 'Daily Sign Ins', fileName: f.filename, contentBase64: f.content.toString('base64'), project: f.project, date }) });
+        const res = await fetch(f.url || mainUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: 'Daily Sign Ins', fileName: f.filename, contentBase64: f.content.toString('base64'), project: f.project, date }) });
         status = res.status; ok = res.ok;
       } catch (e) { status = 0; }
       if (!ok && attempt < 3) await new Promise(r => setTimeout(r, 5000 * attempt));
