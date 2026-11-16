@@ -37,7 +37,11 @@ async function main() {
     db.collection('si_roster').get(),
     db.collection('si_config').doc('report').get()
   ]);
-  const rows = attSnap.docs.map(d => ({ ...d.data(), _id: d.id }));
+  // REPORT_PROJECTS (set in the workflow) limits the report to those projects, e.g. 'HEL16'; leave it blank for all projects
+  const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const only = (process.env.REPORT_PROJECTS || '').split(',').map(norm).filter(Boolean);
+  if (only.length) console.log('Only reporting: ' + only.join(', '));
+  const rows = attSnap.docs.map(d => ({ ...d.data(), _id: d.id })).filter(r => !only.length || only.includes(norm(r.projectName)) || only.includes(norm(r.project)));
   const sigs = {}; sigSnap.docs.forEach(d => { sigs[d.id] = d.data().sig; });
   const people = new Map(); rosSnap.docs.forEach(d => (d.data().people || []).forEach(p => people.set(d.id + '|' + p.id, p)));
   const sortBy = repSnap.exists ? repSnap.data().sort : 'time';
