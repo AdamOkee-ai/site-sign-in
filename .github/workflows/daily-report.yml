@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: daily-attendance-report
+  group: daily-attendance-report-v2
   cancel-in-progress: false
 
 jobs:
