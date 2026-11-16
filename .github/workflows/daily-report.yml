@@ -39,4 +39,5 @@ jobs:
           SHAREPOINT_FLOW_URL: ${{ secrets.SHAREPOINT_FLOW_URL }}
           REPORT_DATE: ${{ github.event.inputs.date }}
           REPORT_HOUR: '21'
+          REPORT_PROJECTS: 'HEL16'
           TZ: Europe/London
