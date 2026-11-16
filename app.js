@@ -792,15 +792,12 @@ function roleBtn(m){
 function membersCard(){
   const card=h("div",{class:"card pad",style:"display:grid;gap:10px"});
   card.append(h("h3",null,"Supervisors and site team"));
-  const me=S.B&&S.B.email, mine=me&&S.members.find(m=>m.id===me), myOn=!!mine&&mine.reports!==false;
-  card.append(h("div",{class:"muted small"},"Site team members get the day's PDF attendance report by email at the end of each day. Turn it off for yourself, or for anyone who does not want it."));
-  if(me) card.append(h("button",{class:"btn sm","aria-pressed":String(myOn),onclick:()=>safeWrite(()=>mine?S.db.doc("members/"+me).update({reports:!myOn}):S.db.doc("members/"+me).set({role:"site",reports:true}),myOn?"You will not get the daily report":"You will get the daily report")},myOn?"My daily report email: On (tap to turn off)":"My daily report email: Off (tap to turn on)"));
+  const me=S.B&&S.B.email;
   const list=h("div");
   if(!S.members.length) list.append(h("div",{class:"muted small"},"Nobody added yet. Owners listed in the security rules always have site team access."));
   S.members.slice().sort((a,b)=>a.id.localeCompare(b.id)).forEach(m=>list.append(h("div",{class:"rrow",style:"flex-wrap:wrap"},
     h("span",null,m.id," ",h("span",{class:"tag",text:m.role==="site"?"Site team":"Supervisor"})),
     h("div",{class:"row"},
-      m.role==="site"?h("button",{class:"btn sm","aria-pressed":String(m.reports!==false),onclick:()=>safeWrite(()=>S.db.doc("members/"+m.id).update({reports:m.reports===false}),m.reports===false?"Daily report turned on for "+m.id:"Daily report turned off for "+m.id)},m.reports===false?"Report: Off":"Report: On"):null,
       m.id===me?h("span",{class:"muted small",text:"You"}):roleBtn(m),
       h("button",{class:"btn sm danger",onclick:()=>safeWrite(()=>S.db.doc("members/"+m.id).delete(),"Removed "+m.id)},"Remove")))));
   const em=h("input",{type:"email",id:"memail",placeholder:"Their email address","aria-label":"Email address",autocomplete:"off",inputmode:"email"});
