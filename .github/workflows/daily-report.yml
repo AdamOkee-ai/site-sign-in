@@ -37,6 +37,7 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           SHAREPOINT_FLOW_URL: ${{ secrets.SHAREPOINT_FLOW_URL }}
+          SHAREPOINT_FLOW_URL_HEL17: ${{ secrets.SHAREPOINT_FLOW_URL_HEL17 }}
           REPORT_DATE: ${{ github.event.inputs.date }}
           REPORT_HOUR: '21'
           REPORT_PROJECTS: 'HEL16'
