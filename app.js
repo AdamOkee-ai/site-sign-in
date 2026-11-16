@@ -640,7 +640,7 @@ function renderSetup(){
   const pane=$("#pane-setup"); pane.replaceChildren();
   pane.append(h("h2",null,"Setup"));
   pane.append(projectsCard());
-  pane.append(accessCard(), membersCard(), importCard(), numbersCard());
+  pane.append(accessCard(), membersCard(), importCard(), numbersCard(), syncCard());
   const box=h("div",{class:"card"});
   S.roster.forEach(co=>{
     const nf=h("input",{type:"text",placeholder:"First name","aria-label":"First name"});
@@ -877,6 +877,83 @@ async function applyNumbers(list){
   }
   toast(set+" clock "+(set===1?"number":"numbers")+" added"+(miss.length?". "+miss.length+" not matched.":"."));
   if(miss.length) showText("Not matched (check the spelling in Setup):\n"+miss.join("\n"));
+}
+/* ---------- Update roster from file (site team): add, update numbers/roles, and offer to remove people not in the file ---------- */
+const nkey=p=>(String(p.f||"")+String(p.l||"")).toLowerCase().normalize("NFKD").replace(/[^\p{L}]/gu,"");
+function planSync(list){
+  const plan=[];
+  for(const c of list){
+    if(!c||!c.name||!Array.isArray(c.people)) continue;
+    const id=slug(c.name), cur=S.roster.find(x=>x.id===id)||S.roster.find(x=>String(x.name).trim().toLowerCase()===String(c.name).trim().toLowerCase());
+    const fm=new Map();
+    c.people.forEach(p=>{const f=String(p.f||"").trim(),l=String(p.l||"").trim(); if(!f||!l) return; const k=nkey({f,l}); if(!fm.has(k)) fm.set(k,{f,l,r:String(p.r||"").trim(),n:String(p.n==null?"":p.n).trim()});});
+    const e={id:cur?cur.id:id,name:cur?cur.name:c.name,isNew:!cur,adds:[],changes:[],removes:[]};
+    const seen=new Set();
+    if(cur) cur.people.forEach(p=>{
+      const k=nkey(p), m=fm.get(k);
+      if(!m){e.removes.push(p);return;}
+      seen.add(k);
+      const nn=m.n&&m.n!==String(p.n||"")?m.n:null, rr=m.r&&m.r.toLowerCase()!==String(p.r||"").toLowerCase()?m.r:null;
+      if(nn!==null||rr!==null) e.changes.push({id:p.id,p,n:nn,r:rr});
+    });
+    fm.forEach((m,k)=>{if(!seen.has(k)) e.adds.push(m);});
+    if(e.adds.length||e.changes.length||e.removes.length) plan.push(e);
+  }
+  return plan;
+}
+function sheetSync(plan){
+  openSheet((sheet,close)=>{
+    const nAdd=plan.reduce((a,e)=>a+e.adds.length,0), nChg=plan.reduce((a,e)=>a+e.changes.length,0), nRem=plan.reduce((a,e)=>a+e.removes.length,0);
+    const boxes=[];
+    sheet.append(h("h2",null,"Check before updating",h("small",null,nAdd+" to add, "+nChg+" to update, "+nRem+" not in the file. Nothing changes until you tap Apply.")));
+    if(!plan.length){sheet.append(h("p",null,"The roster already matches the file."),h("div",{class:"row end"},h("button",{class:"btn",onclick:close},"Close")));return;}
+    plan.forEach(e=>{
+      const box=h("div",{class:"card pad",style:"display:grid;gap:6px;margin:8px 0"},h("b",null,e.name+(e.isNew?" (new company)":"")));
+      if(e.adds.length) box.append(h("div",{class:"small"},h("b",null,"Add ("+e.adds.length+"): "),e.adds.map(m=>fullName(m)+(m.n?" #"+m.n:"")).join(", ")));
+      if(e.changes.length) box.append(h("div",{class:"small"},h("b",null,"Update ("+e.changes.length+"): "),e.changes.map(c=>fullName(c.p)+(c.n!==null?" #"+(c.p.n||"none")+" to #"+c.n:"")+(c.r!==null?" role "+(c.p.r||"none")+" to "+c.r:"")).join(", ")));
+      if(e.removes.length){
+        box.append(h("div",{class:"small"},h("b",null,"Not in the file. Tick to remove ("+e.removes.length+"):")));
+        e.removes.forEach(p=>{const cb=h("input",{type:"checkbox",checked:true,"aria-label":"Remove "+fullName(p)}); boxes.push({e,p,cb});
+          box.append(h("label",{class:"rrow",style:"display:flex;gap:8px;align-items:center"},cb,h("span",null,fullName(p),p.r?" ":"",p.r?h("span",{class:"tag",text:p.r}):null,p.n?" ":"",numTag(p))));});
+      }
+      sheet.append(box);
+    });
+    sheet.append(h("div",{class:"muted small"},"Earlier sign-ins keep their names, so past reports do not change."));
+    const go=h("button",{class:"btn primary"},"Apply changes");
+    sheet.append(h("div",{class:"row end"},h("button",{class:"btn",onclick:close},"Cancel"),go));
+    go.addEventListener("click",async()=>{
+      go.disabled=true; let a=0,u=0,r=0;
+      for(const e of plan){
+        const gone=new Set(boxes.filter(b=>b.e===e&&b.cb.checked).map(b=>b.p.id));
+        const upd=new Map(e.changes.map(c=>[c.id,c]));
+        const fresh=e.adds.map((m,i)=>({id:"i"+Date.now().toString(36)+"-"+i,f:m.f,l:m.l,r:m.r,n:m.n}));
+        const cur=coById(e.id);
+        let ok;
+        if(!cur){ ok=await safeWrite(()=>S.db.doc("roster/"+e.id).set({name:e.name,order:S.roster.length+1,people:fresh})); }
+        else{
+          const keep=cur.people.filter(p=>!gone.has(p.id)).map(p=>{const c=upd.get(p.id); return c?{...p,n:c.n!==null?c.n:p.n,r:c.r!==null?c.r:p.r}:p;});
+          if(!fresh.length&&!upd.size&&!gone.size) continue;
+          ok=await safeWrite(()=>S.db.doc("roster/"+e.id).update({people:keep.concat(fresh)}));
+        }
+        if(!ok){toast("Stopped. "+a+" added, "+u+" updated, "+r+" removed first.");go.disabled=false;return;}
+        a+=fresh.length; u+=e.changes.length; r+=gone.size;
+      }
+      close(); toast("Roster updated: "+a+" added, "+u+" updated, "+r+" removed");
+    });
+  });
+}
+function syncCard(){
+  const card=h("div",{class:"card pad",style:"display:grid;gap:10px"});
+  const file=h("input",{type:"file",accept:".json,application/json","aria-label":"Choose an updated roster file"});
+  card.append(h("h3",null,"Update roster from file"),
+    h("div",{class:"muted small"},"Make the roster match a file. New people are added, clock numbers and roles are updated, and anyone not in the file is listed so you can remove them. You see everything first and nothing changes until you tap Apply."),
+    h("label",{class:"f"},"Updated roster file (.json)",file),
+    h("div",{class:"row end"},h("button",{class:"btn sm primary",onclick:async()=>{
+      const f=file.files&&file.files[0]; if(!f){toast("Choose a file first.");return;}
+      let data; try{data=JSON.parse(await f.text());}catch(e){toast("That file could not be read.");return;}
+      if(!Array.isArray(data)){toast("That file is not a roster.");return;}
+      sheetSync(planSync(data)); file.value="";}},"Check file")));
+  return card;
 }
 function numbersCard(){
   const file=h("input",{type:"file",accept:".json,application/json","aria-label":"Choose a clock numbers file"});
