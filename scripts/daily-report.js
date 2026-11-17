@@ -61,7 +61,9 @@ async function main() {
   const created = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
   const files = [];
   for (const p of projects) {
-    const pdf = await R.makePdf(PDFLib, { rows: p.rows, sigs, projectName: p.name, date, logo, created, people, sortBy });
+    let teams = null;
+    try { const a = await db.collection('si_config').doc('alloc-' + p.id + '-' + date).get(); if (a.exists && Array.isArray(a.data().groups) && a.data().groups.length) teams = a.data().groups; } catch (e) { /* the report works without teams */ }
+    const pdf = await R.makePdf(PDFLib, { rows: p.rows, sigs, projectName: p.name, date, logo, created, people, sortBy, teams });
     // a manual run adds the time to the name, because SharePoint will not overwrite a file that is already there
     const filename = 'site-attendance-' + p.name.replace(/[^A-Za-z0-9_-]+/g, '-') + '-' + date + (manual ? '-rerun-' + created.replace(':', '') : '') + '.pdf';
     files.push({ filename, project: p.name, content: Buffer.from(pdf), url: ownUrl(p.rows[0]) });

@@ -87,6 +87,47 @@ async function makePdf(L, o) {
   });
   if (!groups.length) txt('Nobody signed in on this day.', M, y, 10, false, GREY);
   if (anyWalk) txt('* Not on the company roster', M, Math.min(y + 2, PH - 20), 8.5, false, GREY);
+
+  /* teams and areas page */
+  if (o.teams && o.teams.length) {
+    const byId = new Map(rows.map(r => [r.personId, r]));
+    const used = new Set(); o.teams.forEach(g => { if (g.sup) used.add(g.sup.id); (g.m || []).forEach(x => used.add(x.id)); });
+    const loose = rows.filter(r => !used.has(r.personId));
+    pg = doc.addPage([PW * MM, PH * MM]); y = M;
+    txt('TEAMS AND AREAS', M, y + 6, 16, true, INK); y += 9;
+    txt(o.projectName + '   |   ' + dayName(date) + ' ' + dateLong(date), M, y + 3, 10.5, false, GREY); y += 6; hline(M, M + W, y, RED, 2.2); y += 6;
+    const TR = 7.5;
+    const tcols = [{ t: 'Name', x: M + 1.5 }, { t: 'Company', x: M + 78 }, { t: 'No.', x: M + 118 }, { t: 'In', x: M + 138 }, { t: 'Out', x: M + 158 }];
+    const trow = (nm, co, num, tin, tout, bold, red) => {
+      if (y + TR > PH - 16) { pg = doc.addPage([PW * MM, PH * MM]); y = M; }
+      txt(fit(nm, 76), tcols[0].x, y + 5.2, 9.5, bold, INK); txt(fit(co || '', 38), tcols[1].x, y + 5.2, 9.5, false, INK);
+      txt(fit(num || '', 18), tcols[2].x, y + 5.2, 9.5, false, INK); txt(tin || '', tcols[3].x, y + 5.2, 9.5, false, INK); txt(tout || '', tcols[4].x, y + 5.2, 9.5, false, red ? RED : INK);
+      hline(M, M + W, y + TR, LINE, 0.6); y += TR;
+    };
+    const thead = (title, right, grey) => {
+      if (y + 8.7 + 7 + TR * 2 > PH - 16) { pg = doc.addPage([PW * MM, PH * MM]); y = M; }
+      rect(M, y, W, 8, grey ? GREY : INK); rect(M, y + 8, W, 0.7, RED);
+      txt(title.toUpperCase(), M + 2, y + 5.6, 11, true, WHITE); txt(right, M + W - 2, y + 5.5, 9, false, WHITE, true); y += 8.7;
+      rect(M, y, W, 6, PALE); tcols.forEach(c => txt(c.t.toUpperCase(), c.x, y + 4.2, 8, true, GREY)); y += 6;
+    };
+    const line = (x, role) => {
+      const r = byId.get(x.id);
+      const num = r ? numOf(r) : '';
+      trow(x.n + (role ? '  (' + role + ')' : ''), x.c || (r && r.company) || '', num, r ? (r.timeIn || '') : 'not signed in', r ? (r.timeOut || '-') : '', !!role, r && !r.timeOut);
+    };
+    o.teams.forEach((g, i) => {
+      const n = (g.m || []).length + (g.sup ? 1 : 0);
+      thead(g.area || ('Team ' + (i + 1)), (g.sup ? 'Supervisor: ' + g.sup.n + '  |  ' : '') + n + ' people', false);
+      if (g.sup) line(g.sup, 'Supervisor');
+      (g.m || []).forEach(x => line(x, ''));
+      if (!n) trow('Nobody in this team', '', '', '', '', false, false);
+      y += 5;
+    });
+    if (loose.length) {
+      thead('Not in a team', loose.length + ' people', true);
+      loose.forEach(r => trow(r.name, r.company, numOf(r), r.timeIn || '', r.timeOut || '-', false, !r.timeOut));
+    }
+  }
   const pages = doc.getPages();
   pages.forEach((p, i) => { pg = p; txt('Okee Electrics  |  Site Sign-In', M, PH - 8, 8, false, GREY); txt('Page ' + (i + 1) + ' of ' + pages.length + '  |  Created ' + (o.created || ''), M + W, PH - 8, 8, false, GREY, true); });
   return await doc.save();
