@@ -175,6 +175,7 @@ async function safeWrite(fn,okMsg){
   try{await fn(); if(okMsg) toast(okMsg); return true;}
   catch(e){
     const c=(e&&e.code)||"";
+    if(e&&e.already){ toast("Already signed in today. Check the sheet."); return true; }
     if(c.includes("permission-denied")) toast("You do not have permission to do that.");
     else if(c.includes("resource-exhausted")||c.includes("quota")) toast("The database limit has been reached. Tell the site team.");
     else if(c.includes("not-found")) toast("That record no longer exists. Reload and try again.");
@@ -232,11 +233,21 @@ function sheetSignIn(opts){
       go.disabled=true;
       const doc={...rec,date:S.today,day:dayName(S.today),project:S.project,projectName:proj.name,area:areaSel?areaSel.value:"",timeIn:tin.value,timeOut:"",signedAt:new Date().toISOString()};
       const docId=S.today+"_"+S.project+"_"+rec.personId;
+      /* A retry after a dropped signal may find the signature already saved (contractors cannot overwrite it): carry on to the attendance record */
       const ok=await safeWrite(async()=>{
-        await S.db.doc("sigs/"+docId).set({date:S.today,sig:pad.value()});   /* signatures are kept apart so only supervisors can read them */
-        await S.db.doc("attendance/"+docId).set(doc);
+        try{ await S.db.doc("sigs/"+docId).set({date:S.today,sig:pad.value()}); }   /* signatures are kept apart so only supervisors can read them */
+        catch(e){ if(!(e&&String(e.code||"").includes("permission-denied"))) throw e; }
+        try{ await S.db.doc("attendance/"+docId).set(doc); }
+        catch(e){
+          if(e&&String(e.code||"").includes("permission-denied")){
+            let ex=false; try{ const s=await S.db.doc("attendance/"+docId).get(); ex=!!(s&&s.exists); }catch(_){}
+            if(ex){ const a=new Error("already"); a.already=true; throw a; }
+          }
+          throw e;
+        }
       },"Signed in: "+rec.name);
-      if(ok) close(); else go.disabled=false;
+      if(ok) close();
+      else go.disabled=false;
     });
   });
 }
