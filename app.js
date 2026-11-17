@@ -62,7 +62,7 @@ function staleRows(){
 function tabDefs(){
   const t=[{id:"sign",label:"Sign in",sub:"Add yourself"}];
   if(S.isAdmin||S.isSuper) t.push({id:"list",label:"On site",sub:"Who is here"});
-  if(S.isAdmin){const nStale=staleRows().length; t.push({id:"summary",label:"Summary",sub:nStale?nStale+" to fix":"Site team"});t.push({id:"setup",label:"Setup",sub:"Manage"});}
+  if(S.isAdmin){const nStale=staleRows().length; t.push({id:"teams",label:"Teams",sub:"Areas"});t.push({id:"summary",label:"Summary",sub:nStale?nStale+" to fix":"Site team"});t.push({id:"setup",label:"Setup",sub:"Manage"});}
   return t;
 }
 function renderTabs(){
@@ -72,7 +72,7 @@ function renderTabs(){
   document.body.classList.toggle("solo",defs.length<2);
   if(!defs.find(d=>d.id===S.tab)) S.tab="sign";
   defs.forEach(d=>box.append(h("button",{role:"tab","aria-selected":String(S.tab===d.id),onclick:()=>{S.tab=d.id;render();window.scrollTo(0,0);}},d.label,h("small",{text:d.sub}))));
-  ["sign","list","summary","setup"].forEach(id=>{$("#pane-"+id).hidden=(id!==S.tab);});
+  ["sign","list","teams","summary","setup"].forEach(id=>{$("#pane-"+id).hidden=(id!==S.tab);});
 }
 
 /* ---------- data selectors ---------- */
@@ -1010,10 +1010,140 @@ function render(soft){
   renderFoot();
   const keepOpen=[...document.querySelectorAll("#pane-setup details[open]")].map(d=>d.dataset.id);
   const ae=document.activeElement; const typing=ae&&ae.tagName==="INPUT"&&ae.closest("#main");
-  const rendersByTab={sign:renderSign,list:renderList,summary:renderSummary,setup:renderSetup};
+  const rendersByTab={sign:renderSign,list:renderList,teams:renderTeams,summary:renderSummary,setup:renderSetup};
   if(soft && typing) return; // live updates must not wipe what someone is typing
   rendersByTab[S.tab]();
   if(S.tab==="setup") document.querySelectorAll("#pane-setup details").forEach(d=>{if(keepOpen.includes(d.dataset.id))d.open=true;});
+}
+
+
+/* ---------- teams: group people by supervisor and area for today ---------- */
+const A={key:"",doc:null,latest:null,u1:null,u2:null,seeded:""};
+function tproj(){
+  if(S.tproj&&projById(S.tproj)) return S.tproj;
+  const v=viewId(); if(v&&v!=="all"&&projById(v)) return v;
+  return (S.project&&projById(S.project)?S.project:(S.projects[0]&&S.projects[0].id))||"";
+}
+function ensureAlloc(){
+  const p=tproj(); const key=p?p+"|"+S.today:"";
+  if(key===A.key) return;
+  if(A.u1){A.u1();A.u1=null;} if(A.u2){A.u2();A.u2=null;}
+  A.key=key; A.doc=null; A.latest=null; A.seeded="";
+  if(!key||!S.db) return;
+  A.u1=S.db.doc("config/alloc-"+p+"-"+S.today).onSnapshot(snap=>{A.doc=snap.exists?snap.data():null;A.loadedDoc=true;maybeSeed();if(S.tab==="teams")render(true);},()=>{});
+  A.u2=S.db.doc("config/alloc-"+p+"-latest").onSnapshot(snap=>{A.latest=snap.exists?snap.data():null;A.loadedLatest=true;maybeSeed();},()=>{});
+}
+/* first visit of the day: carry the last set of teams forward (supervisors and areas), the site team then adjusts */
+function maybeSeed(){
+  if(!S.isAdmin||A.doc||!A.latest||!A.loadedDoc||!A.loadedLatest||A.seeded===A.key) return;
+  if(!A.latest.date||A.latest.date>=S.today||!Array.isArray(A.latest.groups)||!A.latest.groups.length) return;
+  A.seeded=A.key;
+  saveAlloc(A.latest.groups,"Teams copied from "+dateLong(A.latest.date));
+}
+function saveAlloc(groups,msg){
+  const p=tproj(); const body={project:p,date:S.today,groups};
+  A.doc=body; render(true);
+  return safeWrite(async()=>{
+    await S.db.doc("config/alloc-"+p+"-"+S.today).set(body);
+    await S.db.doc("config/alloc-"+p+"-latest").set(body);
+  },msg||"Saved");
+}
+function teamPool(){
+  const p=tproj(); const m=new Map();
+  S.att.filter(a=>a.project===p).forEach(a=>{if(!m.has(a.personId)) m.set(a.personId,{id:a.personId,n:a.name,c:a.company||""});});
+  return m;
+}
+function teamNumbers(groups,pool){
+  const used=new Set(); groups.forEach(g=>{if(g.sup) used.add(g.sup.id); (g.m||[]).forEach(x=>used.add(x.id));});
+  return {used,free:[...pool.values()].filter(x=>!used.has(x.id)).sort((a,b)=>a.n.localeCompare(b.n))};
+}
+function sheetAddToTeam(gid){
+  openSheet((sheet,close)=>{
+    const groups=(A.doc&&A.doc.groups)||[]; const pool=teamPool(); const {free}=teamNumbers(groups,pool);
+    const q=h("input",{type:"search",placeholder:"Search by name or company",autocomplete:"off","aria-label":"Search"});
+    const list=h("div",{class:"list",style:"max-height:46vh;overflow:auto"}); const chosen=new Set();
+    const go=h("button",{class:"btn primary"},"Add to team");
+    const draw=()=>{
+      list.replaceChildren(); const t=q.value.trim().toLowerCase();
+      const rows=free.filter(x=>!t||(x.n+" "+x.c).toLowerCase().includes(t));
+      if(!rows.length) list.append(h("div",{class:"muted small",style:"padding:12px"},free.length?"No match.":"Everyone signed in is already in a team."));
+      rows.forEach(x=>{
+        const cb=h("input",{type:"checkbox",checked:chosen.has(x.id),onchange:e=>{e.target.checked?chosen.add(x.id):chosen.delete(x.id);go.textContent=chosen.size?"Add "+chosen.size+" to team":"Add to team";}});
+        list.append(h("label",{class:"person",style:"cursor:pointer"},cb,h("div",{class:"who"},h("div",{class:"nm"},x.n),h("div",{class:"meta"},x.c))));
+      });
+    };
+    q.addEventListener("input",draw); draw();
+    go.addEventListener("click",async()=>{
+      if(!chosen.size){close();return;}
+      const adds=free.filter(x=>chosen.has(x.id));
+      const next=((A.doc&&A.doc.groups)||[]).map(g=>g.id===gid?{...g,m:(g.m||[]).concat(adds)}:g);
+      close(); await saveAlloc(next,"Added "+adds.length);
+    });
+    sheet.append(h("h2",null,"Add people",h("small",null,"Only people signed in today")),q,list,h("div",{class:"row end"},h("button",{class:"btn",onclick:close},"Cancel"),go));
+  });
+}
+function renderTeams(){
+  const pane=$("#pane-teams"); pane.replaceChildren();
+  ensureAlloc();
+  pane.append(h("h2",null,"Teams and areas"));
+  if(S.date!==S.today){
+    pane.append(h("div",{class:"card pad",style:"display:grid;gap:10px"},h("div",null,"Teams are set for today. You are looking at "+dateLong(S.date)+"."),
+      h("button",{class:"btn primary",onclick:()=>{S.date=S.today;subscribeAtt();render();}},"Go to today")));
+    return;
+  }
+  if(S.projects.length>1){
+    const v=tproj();
+    pane.append(h("div",{class:"seg",role:"group","aria-label":"Project"},...S.projects.map(p=>h("button",{"aria-pressed":String(v===p.id),onclick:()=>{S.tproj=p.id;render();}},p.name))));
+  }
+  const p=tproj(); const proj=projById(p);
+  if(!proj){pane.append(h("div",{class:"muted"},"No project yet."));return;}
+  const groups=(A.doc&&A.doc.groups)||[]; const pool=teamPool(); const {free}=teamNumbers(groups,pool);
+  const allocated=pool.size-free.length;
+  pane.append(h("div",{class:"muted small",style:"margin:6px 0 10px"},pool.size+" signed in · "+allocated+" in a team · "+free.length+" not in a team"));
+  const areas=proj.areas||[];
+  const peopleOpts=g=>{
+    const opts=[...pool.values()]; if(g.sup&&!pool.has(g.sup.id)) opts.push(g.sup);
+    return opts.sort((a,b)=>a.n.localeCompare(b.n));
+  };
+  const update=(gid,fn,msg)=>saveAlloc(groups.map(g=>g.id===gid?fn(g):g),msg);
+  groups.forEach((g,i)=>{
+    const m=g.m||[]; const total=m.length+(g.sup?1:0); const here=m.filter(x=>pool.has(x.id)).length+(g.sup&&pool.has(g.sup.id)?1:0);
+    const supSel=h("select",{"aria-label":"Supervisor"},h("option",{value:""},"No supervisor"),...peopleOpts(g).map(x=>h("option",{value:x.id,selected:g.sup&&g.sup.id===x.id},x.n+(x.c?" · "+x.c:""))));
+    supSel.addEventListener("change",()=>{
+      const id=supSel.value; const per=id?(pool.get(id)||(g.sup&&g.sup.id===id?g.sup:null)):null;
+      saveAlloc(groups.map(x=>{
+        if(x.id===g.id) return {...x,sup:per,m:(x.m||[]).filter(y=>!per||y.id!==per.id)};
+        return {...x,sup:x.sup&&per&&x.sup.id===per.id?null:x.sup,m:(x.m||[]).filter(y=>!per||y.id!==per.id)};
+      }),"Supervisor set");
+    });
+    let areaEl;
+    if(areas.length){
+      areaEl=h("select",{"aria-label":"Area"},h("option",{value:""},"Area not set"),...(g.area&&!areas.includes(g.area)?[g.area]:[]).concat(areas).map(a=>h("option",{value:a,selected:g.area===a},a)));
+      areaEl.addEventListener("change",()=>update(g.id,x=>({...x,area:areaEl.value}),"Area set"));
+    }else{
+      areaEl=h("input",{type:"text",value:g.area||"",placeholder:"Area or zone, e.g. Data hall 2","aria-label":"Area",autocomplete:"off"});
+      areaEl.addEventListener("change",()=>update(g.id,x=>({...x,area:areaEl.value.trim()}),"Area set"));
+    }
+    const head=h("div",{class:"grouphead"},h("h3",null,g.area||("Team "+(i+1))),h("span",null,total+" people · "+here+" here"));
+    const body=h("div",{class:"pad",style:"display:grid;gap:8px;padding:12px 14px"},
+      h("label",{class:"f"},"Supervisor",supSel),h("label",{class:"f"},"Area",areaEl));
+    const list=h("div",{class:"list"});
+    if(g.sup) list.append(h("div",{class:"person"},h("div",{class:"who"},h("div",{class:"nm"},g.sup.n),h("div",{class:"meta"},g.sup.c||"")),h("span",{class:"tag",text:"Supervisor"}),pool.has(g.sup.id)?null:h("span",{class:"tag",text:"not signed in"})));
+    m.forEach(x=>list.append(h("div",{class:"person"},h("div",{class:"who"},h("div",{class:"nm"},x.n),h("div",{class:"meta"},x.c||"")),
+      pool.has(x.id)?null:h("span",{class:"tag",text:"not signed in"}),
+      h("button",{class:"btn sm","aria-label":"Remove "+x.n,onclick:()=>update(g.id,y=>({...y,m:(y.m||[]).filter(z=>z.id!==x.id)}),"Removed")},"✕"))));
+    if(!g.sup&&!m.length) list.append(h("div",{class:"muted small",style:"padding:12px 14px"},"Nobody in this team yet."));
+    const acts=h("div",{class:"row",style:"padding:12px 14px"},
+      h("button",{class:"btn primary",onclick:()=>sheetAddToTeam(g.id)},"Add people"),
+      h("button",{class:"btn danger",onclick:()=>{ if(!total||confirm("Delete this team? Its "+total+" people go back to not in a team.")) saveAlloc(groups.filter(x=>x.id!==g.id),"Team deleted"); }},"Delete team"));
+    pane.append(h("div",{class:"card group",style:"margin-bottom:12px"},head,body,list,acts));
+  });
+  pane.append(h("button",{class:"btn primary",style:"width:100%;margin:4px 0 14px",onclick:()=>saveAlloc(groups.concat([{id:"t"+Date.now().toString(36),sup:null,area:"",m:[]}]),"Team added")},"Add team"));
+  const un=h("div",{class:"card group"},h("div",{class:"grouphead",style:"background:var(--muted,#5b6770)"},h("h3",null,"Not in a team"),h("span",null,free.length+" people")));
+  const ul=h("div",{class:"list"});
+  free.forEach(x=>ul.append(h("div",{class:"person"},h("div",{class:"who"},h("div",{class:"nm"},x.n),h("div",{class:"meta"},x.c)))));
+  if(!free.length) ul.append(h("div",{class:"muted small",style:"padding:12px 14px"},pool.size?"Everyone signed in is in a team.":"Nobody has signed in on "+proj.name+" yet."));
+  un.append(ul); pane.append(un);
 }
 
 /* ---------- subscriptions ---------- */
