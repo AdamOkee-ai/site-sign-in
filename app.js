@@ -399,7 +399,7 @@ function renderList(){
     gs.forEach((g,i)=>{
       const ids=(g.sup?[g.sup.id]:[]).concat((g.m||[]).map(x=>x.id)); ids.forEach(x=>used.add(x));
       const rs=ids.map(x=>by.get(x)).filter(Boolean);
-      if(rs.length) out.push({name:g.area||("Team "+(i+1)),sub:g.sup?"Supervisor: "+g.sup.n:"",rows:rs});
+      if(rs.length) out.push({name:g.name||g.area||("Team "+(i+1)),sub:(g.name&&g.area?g.area+" · ":"")+(g.sup?"Supervisor: "+g.sup.n:""),rows:rs});
     });
     const rest=f.filter(r=>!used.has(r.personId)); if(rest.length) out.push({name:"Not in a team",sub:"",rows:rest.sort(cmpName)});
     return out;
@@ -597,7 +597,7 @@ async function makePdfBytes(){
     };
     teamsData.forEach((g, i) => {
       const n = (g.m || []).length + (g.sup ? 1 : 0);
-      thead(g.area || ('Team ' + (i + 1)), (g.sup ? 'Supervisor: ' + g.sup.n + '  |  ' : '') + n + ' people', false);
+      thead(g.name || g.area || ('Team ' + (i + 1)), (g.name && g.area ? g.area + '  |  ' : '') + (g.sup ? 'Supervisor: ' + g.sup.n + '  |  ' : '') + n + ' people', false);
       if (g.sup) line(g.sup, 'Supervisor');
       (g.m || []).forEach(x => line(x, ''));
       if (!n) trow('Nobody in this team', '', '', '', '', false, false);
@@ -1184,9 +1184,11 @@ function renderTeams(){
       areaEl=h("input",{type:"text",value:g.area||"",placeholder:"Area or zone, e.g. Data hall 2","aria-label":"Area",autocomplete:"off"});
       areaEl.addEventListener("change",()=>update(g.id,x=>({...x,area:areaEl.value.trim()}),"Area set"));
     }
-    const head=h("div",{class:"grouphead"},h("h3",null,g.area||("Team "+(i+1))),h("span",null,total+" people · "+here+" here"));
+    const nameEl=h("input",{type:"text",value:g.name||"",placeholder:g.area||("Team "+(i+1)),"aria-label":"Team name",autocomplete:"off",maxlength:"60"});
+    nameEl.addEventListener("change",()=>update(g.id,x=>({...x,name:nameEl.value.trim()}),"Name saved"));
+    const head=h("div",{class:"grouphead"},h("h3",null,g.name||g.area||("Team "+(i+1))),h("span",null,total+" people · "+here+" here"));
     const body=h("div",{class:"pad",style:"display:grid;gap:8px;padding:12px 14px"},
-      h("label",{class:"f"},"Supervisor",supSel),h("label",{class:"f"},"Area",areaEl));
+      h("label",{class:"f"},"Team name (optional)",nameEl),h("label",{class:"f"},"Supervisor",supSel),h("label",{class:"f"},"Area",areaEl));
     const list=h("div",{class:"list"});
     if(g.sup) list.append(h("div",{class:"person"},h("div",{class:"who"},h("div",{class:"nm"},g.sup.n),h("div",{class:"meta"},g.sup.c||"")),h("span",{class:"tag",text:"Supervisor"}),pool.has(g.sup.id)?null:h("span",{class:"tag",text:"not signed in"})));
     m.forEach(x=>list.append(h("div",{class:"person"},h("div",{class:"who"},h("div",{class:"nm"},x.n),h("div",{class:"meta"},x.c||"")),

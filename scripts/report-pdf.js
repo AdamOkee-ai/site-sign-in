@@ -117,7 +117,7 @@ async function makePdf(L, o) {
     };
     o.teams.forEach((g, i) => {
       const n = (g.m || []).length + (g.sup ? 1 : 0);
-      thead(g.area || ('Team ' + (i + 1)), (g.sup ? 'Supervisor: ' + g.sup.n + '  |  ' : '') + n + ' people', false);
+      thead(g.name || g.area || ('Team ' + (i + 1)), (g.name && g.area ? g.area + '  |  ' : '') + (g.sup ? 'Supervisor: ' + g.sup.n + '  |  ' : '') + n + ' people', false);
       if (g.sup) line(g.sup, 'Supervisor');
       (g.m || []).forEach(x => line(x, ''));
       if (!n) trow('Nobody in this team', '', '', '', '', false, false);
