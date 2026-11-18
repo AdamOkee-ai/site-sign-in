@@ -292,7 +292,7 @@ function sheetSignOut(r){
     if(!S.isAdmin&&r.date===S.today){
       const t0=r.signedAt?Date.parse(r.signedAt):NaN;
       const mins=isFinite(t0)?Math.round((Date.now()-t0)/60000):null;
-      if(mins!==null&&mins<240){
+      if(mins!==null&&mins<120){
         const ago=mins<60?mins+" minute"+(mins===1?"":"s"):Math.floor(mins/60)+" h "+(mins%60)+" min";
         sheet.insertBefore(h("div",{class:"banner warn",role:"alert"},"You signed in at "+r.timeIn+" ("+ago+" ago). Are you sure you are leaving site?"),sheet.querySelector("label.f"));
         go.textContent="Yes, I am leaving site";
