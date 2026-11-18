@@ -288,6 +288,16 @@ function sheetSignOut(r){
       err,
       h("div",{class:"row end"},h("button",{class:"btn",onclick:close},"Cancel"),go)
     ].filter(Boolean));
+    /* soon after signing in, ask once more: this stops accidental sign-outs (site team are not asked) */
+    if(!S.isAdmin&&r.date===S.today){
+      const t0=r.signedAt?Date.parse(r.signedAt):NaN;
+      const mins=isFinite(t0)?Math.round((Date.now()-t0)/60000):null;
+      if(mins!==null&&mins<240){
+        const ago=mins<60?mins+" minute"+(mins===1?"":"s"):Math.floor(mins/60)+" h "+(mins%60)+" min";
+        sheet.insertBefore(h("div",{class:"banner warn",role:"alert"},"You signed in at "+r.timeIn+" ("+ago+" ago). Are you sure you are leaving site?"),sheet.querySelector("label.f"));
+        go.textContent="Yes, I am leaving site";
+      }
+    }
     go.addEventListener("click",async()=>{
       if(!tout.value){err.textContent="Enter your time out.";return;}
       if(tout.value<r.timeIn){err.textContent="Time out is earlier than time in ("+r.timeIn+").";return;}
