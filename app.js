@@ -81,6 +81,7 @@ const coById=id=>S.roster.find(c=>c.id===id);
 /* Contractor phones do not listen to the whole day's list: every sign-in would be re-read by every phone and the free daily read limit runs out. They fetch only what they need. */
 function lite(){return !S.isAdmin&&!S.isSuper;}
 S.liteOpen={proj:"",rows:[],at:0,loading:false};
+S.sumOpen=new Set();
 async function fetchLiteOpen(force){
   const L=S.liteOpen; if(!S.db||!S.project||L.loading) return;
   if(!force&&L.proj===S.project&&Date.now()-L.at<45000) return;
@@ -717,6 +718,7 @@ function renderSummary(){
   if(open) pane.append(h("div",{class:"banner warn"},open+" "+(open===1?"person has":"people have")+" no time out recorded for this day."));
   const walk=rows.filter(r=>r.walkIn).length;
   if(walk) pane.append(h("div",{class:"banner warn"},walk+" "+(walk===1?"person is":"people are")+" not on a roster. Check the On site tab."));
+  const tail=[];
   if(!rows.length){pane.append(h("div",{class:"card empty"},"Nobody has signed in on "+dateLong(S.date)+"."));}
   else{
     const max=Math.max(...groups.map(g=>g.rows.length));
@@ -724,20 +726,35 @@ function renderSummary(){
     groups.slice().sort((a,b)=>b.rows.length-a.rows.length||a.name.localeCompare(b.name)).forEach(g=>{
       const gi=g.rows.filter(r=>!r.timeOut).length, go=g.rows.length-gi;
       const ins=g.rows.map(r=>r.timeIn).sort()[0];
-      bars.append(h("div",{class:"bar"},
-        h("div",null,h("div",{class:"nm",text:g.name}),h("div",{class:"muted small",text:"First in "+ins}),h("div",{class:"muted small",text:discCounts(g.rows).map(([k,n])=>k+" "+n).join(" · ")})),
+      const isOpen=S.sumOpen.has(g.name);
+      bars.append(h("button",{type:"button",class:"bar","aria-expanded":String(isOpen),style:"width:100%;text-align:left;background:none;border:0;padding:0;cursor:pointer;font:inherit;color:inherit",
+        onclick:()=>{ if(S.sumOpen.has(g.name)) S.sumOpen.delete(g.name); else S.sumOpen.add(g.name); render(); }},
+        h("div",null,h("div",{class:"nm",text:(isOpen?"▾ ":"▸ ")+g.name}),h("div",{class:"muted small",text:"First in "+ins}),h("div",{class:"muted small",text:discCounts(g.rows).map(([k,n])=>k+" "+n).join(" · ")})),
         h("div",{class:"track",role:"img","aria-label":g.name+": "+gi+" on site, "+go+" signed out"},
           h("div",{class:"seg-in",style:"width:"+(gi/max*100)+"%"}),h("div",{class:"seg-out",style:"width:"+(go/max*100)+"%"})),
         h("div",{class:"n",text:g.rows.length})));
+      if(isOpen){
+        const list=h("div",{class:"list",style:"margin:2px 0 10px;border:1px solid var(--line);border-radius:8px;overflow:hidden"});
+        g.rows.forEach(r=>{
+          const actions=[];
+          if(S.canWrite&&!r.timeOut&&(S.date===S.today||S.isAdmin)) actions.push(h("button",{class:"btn sm",onclick:()=>sheetSignOut(r)},S.date===S.today?"Sign out":"Set time out"));
+          if(S.isAdmin&&r.timeOut) actions.push(h("button",{class:"btn sm",onclick:async()=>{await safeWrite(()=>S.db.doc("attendance/"+r._id).update({timeOut:""}),"Sign-out removed");}},"Undo out"));
+          list.append(h("div",{class:"person",style:"flex-wrap:wrap"},
+            h("div",{class:"who"},h("div",{class:"nm",text:r.name}),h("div",{class:"meta"},numOf(r)?h("span",{class:"tag",text:"No. "+numOf(r)}):null,r.role?h("span",{class:"tag",text:discOf(r.role)}):null,viewId()==="all"&&r.projectName?h("span",{class:"tag",text:r.projectName}):null)),
+            h("div",{style:"display:flex;flex-direction:column;align-items:flex-end;gap:4px"},h("span",{class:"pill "+(r.timeOut?"out":"in"),text:r.timeOut?"Out":"On site"}),h("span",{class:"times",text:r.timeIn+" – "+(r.timeOut||"…")})),
+            actions.length?h("div",{class:"row end",style:"width:100%"},actions):null));
+        });
+        bars.append(list);
+      }
     });
+    pane.append(h("div",{class:"card pad",style:"display:grid;gap:12px"},
+      h("h3",null,"By contractor"),bars,
+      h("div",{class:"legend"},h("span",null,h("i",{style:"background:var(--good)"}),S.date<S.today?"No time out":"On site"),h("span",null,h("i",{style:"background:var(--muted);opacity:.55"}),"Signed out"))));
     const dBars=h("div",{class:"bars"}); const dAll=discCounts(rows); const dMax=Math.max(...dAll.map(x=>x[1]));
     dAll.forEach(([k,n])=>{ const inD=rows.filter(r=>discOf(r.role)===k&&!r.timeOut).length;
       dBars.append(h("div",{class:"bar"},h("div",null,h("div",{class:"nm",text:k}),h("div",{class:"muted small",text:inD+(S.date<S.today?" no time out":" on site now")})),
         h("div",{class:"track",role:"img","aria-label":k+": "+n},h("div",{class:"seg-in",style:"width:"+(n/dMax*100)+"%"})),h("div",{class:"n",text:n}))); });
     pane.append(h("div",{class:"card pad",style:"display:grid;gap:12px"},h("h3",null,"By discipline"),dBars));
-    pane.append(h("div",{class:"card pad",style:"display:grid;gap:12px"},
-      h("h3",null,"By contractor"),bars,
-      h("div",{class:"legend"},h("span",null,h("i",{style:"background:var(--good)"}),S.date<S.today?"No time out":"On site"),h("span",null,h("i",{style:"background:var(--muted);opacity:.55"}),"Signed out"))));
     const act=h("div",{class:"row"},
       h("button",{class:"btn primary",onclick:async()=>{
         try{await navigator.clipboard.writeText(summaryText());toast("Report copied");}
@@ -750,10 +767,10 @@ function renderSummary(){
       S.downloads?h("button",{class:"btn",onclick:async()=>{
         try{await S.downloads.save({filename:"site-attendance-"+(viewId()==="all"?"all":projName(viewId()))+"-"+S.date+".csv",data:csvText()});}
         catch(e){if(!e||e.code!=="declined")toast("Could not create the file.");}}},"Download CSV"):null);
-    pane.append(h("div",{class:"row",style:"align-items:center;gap:10px"},h("span",{class:"muted small",text:"Sort names in each company by"}),
+    tail.push(h("div",{class:"row",style:"align-items:center;gap:10px"},h("span",{class:"muted small",text:"Sort names in each company by"}),
       h("div",{class:"seg",role:"group","aria-label":"Sort names by"},...[["time","Time in"],["first","First name"],["last","Surname"]].map(([id,label])=>
         h("button",{"aria-pressed":String(S.sortBy===id),onclick:()=>{S.sortBy=id;render();safeWrite(()=>S.db.doc("config/report").set({sort:id}));}},label)))));
-    pane.append(act);
+    tail.push(act);
   }
   const ab=absentGroups();
   if(S.roster.length){
@@ -764,6 +781,7 @@ function renderSummary(){
       h("div",{class:"list"},...g.people.map(p=>h("div",{class:"person"},h("div",{class:"who"},h("div",{class:"nm",text:p.name}),h("div",{class:"meta"},p.r?h("span",{class:"tag",text:p.r}):null,p.num?h("span",{class:"tag",text:"No. "+p.num}):null)))))); card.append(d); });
     pane.append(card);
   }
+  pane.append(...tail);
 }
 function showText(t){
   openSheet((sheet,close)=>{
