@@ -78,6 +78,19 @@ function renderTabs(){
 /* ---------- data selectors ---------- */
 const att=()=>viewRows();
 const coById=id=>S.roster.find(c=>c.id===id);
+/* Contractor phones do not listen to the whole day's list: every sign-in would be re-read by every phone and the free daily read limit runs out. They fetch only what they need. */
+function lite(){return !S.isAdmin&&!S.isSuper;}
+S.liteOpen={proj:"",rows:[],at:0,loading:false};
+async function fetchLiteOpen(force){
+  const L=S.liteOpen; if(!S.db||!S.project||L.loading) return;
+  if(!force&&L.proj===S.project&&Date.now()-L.at<45000) return;
+  L.loading=true; L.proj=S.project;
+  try{
+    const sn=await S.db.collection("attendance").where("date","==",S.today).where("project","==",S.project).where("timeOut","==","").get();
+    L.rows=sn.docs.map(d=>({...d.data(),_id:d.id})); L.at=Date.now();
+  }catch(e){ L.at=Date.now()-30000; }
+  L.loading=false; if(S.tab==="sign") render(true);
+}
 function recFor(personId){return S.att.find(a=>a.personId===personId&&a.project===S.project);}
 const projById=id=>S.projects.find(p=>p.id===id);
 const projName=id=>(projById(id)&&projById(id).name)||id||"";
@@ -229,8 +242,11 @@ function sheetSignIn(opts){
       if(!tin.value){err.textContent="Enter your time in.";return;}
       if(!pad.isValid()){err.textContent="Sign in the box before you sign in.";return;}
       if(S.date!==S.today){err.textContent="Switch back to today to sign in.";return;}
-      if(recFor(rec.personId)){err.textContent="This person is already signed in today.";return;}
+      if(!lite()&&recFor(rec.personId)){err.textContent="This person is already signed in today.";return;}
       go.disabled=true;
+      if(lite()){
+        try{ const ex=await S.db.doc("attendance/"+S.today+"_"+S.project+"_"+rec.personId).get(); if(ex&&ex.exists){ err.textContent=rec.name+" is already signed in today. Use Sign out to leave site."; go.disabled=false; return; } }catch(e){ /* offline: the database refuses a second sign-in anyway */ }
+      }
       const doc={...rec,date:S.today,day:dayName(S.today),project:S.project,projectName:proj.name,area:areaSel?areaSel.value:"",timeIn:tin.value,timeOut:"",signedAt:new Date().toISOString()};
       const docId=S.today+"_"+S.project+"_"+rec.personId;
       /* A retry after a dropped signal may find the signature already saved (contractors cannot overwrite it): carry on to the attendance record */
@@ -246,6 +262,7 @@ function sheetSignIn(opts){
           throw e;
         }
       },"Signed in: "+rec.name);
+      if(ok&&lite()) S.liteOpen.at=0;
       if(ok) close();
       else go.disabled=false;
     });
@@ -269,6 +286,7 @@ function sheetSignOut(r){
       if(tout.value<r.timeIn){err.textContent="Time out is earlier than time in ("+r.timeIn+").";return;}
       go.disabled=true;
       const ok=await safeWrite(()=>S.db.doc("attendance/"+r._id).update({timeOut:tout.value,outAt:new Date().toISOString()}),"Signed out: "+r.name);
+      if(ok&&lite()){ S.liteOpen.rows=S.liteOpen.rows.filter(x=>x._id!==r._id); S.liteOpen.at=0; }
       if(ok) close(); else go.disabled=false;
     });
   });
@@ -311,7 +329,7 @@ function renderSign(){
     h("label",{class:"f",for:"co"},"Company",sel)));
   const co=coById(S.company);
   if(co){
-    const inCount=co.people.filter(p=>recFor(p.id)).length;
+    const inCount=lite()?0:co.people.filter(p=>recFor(p.id)).length;
     const q=h("input",{type:"search",id:"q",placeholder:"Search name",value:S.q,"aria-label":"Search names",autocomplete:"off"});
     const listBox=h("div",{class:"card"});
     q.addEventListener("input",()=>{S.q=q.value;drawList();});
@@ -322,7 +340,7 @@ function renderSign(){
         .sort((a,b)=>(fullName(a)).localeCompare(fullName(b)));
       const wrap=h("div",{class:"list"});
       ppl.forEach(p=>{
-        const r=recFor(p.id);
+        const r=lite()?null:recFor(p.id);
         const meta=h("div",{class:"meta"},p.r?h("span",{class:"tag",text:p.r}):null,numTag(p));
         let right;
         if(!r) right=h("span",{class:"pill out",text:"Tap to sign in"});
@@ -342,13 +360,14 @@ function renderSign(){
     drawList();
     pane.append(
       h("div",{class:"row",style:"justify-content:space-between"},
-        h("h3",null,co.name),h("span",{class:"muted small",text:inCount+" of "+co.people.length+" signed in"})),
+        h("h3",null,co.name),lite()?null:h("span",{class:"muted small",text:inCount+" of "+co.people.length+" signed in"})),
       q,listBox);
   }
   pane.append(h("p",{class:"muted small",style:"text-align:center;margin:14px 0 0"},"Can't find your name? Ask the site team to add you."));
 }
 function renderSignOut(pane){
-  const here=S.att.filter(a=>a.project===S.project&&!a.timeOut).sort((a,b)=>a.name.localeCompare(b.name));
+  if(lite()) fetchLiteOpen(false);
+  const here=(lite()?(S.liteOpen.proj===S.project?S.liteOpen.rows:[]):S.att.filter(a=>a.project===S.project&&!a.timeOut)).slice().sort((a,b)=>a.name.localeCompare(b.name));
   const q=h("input",{type:"search",id:"q",placeholder:"Search your name or company",value:S.q,"aria-label":"Search people on site",autocomplete:"off"});
   const box=h("div",{class:"card"});
   q.addEventListener("input",()=>{S.q=q.value;draw();});
@@ -362,12 +381,13 @@ function renderSignOut(pane){
         sheetSignOut(r);}},
       h("div",{class:"who"},h("div",{class:"nm",text:r.name}),h("div",{class:"meta"},h("span",{text:r.company}))),
       h("span",{class:"pill in",text:"In "+r.timeIn}))));
-    if(!f.length) wrap.append(h("div",{class:"empty"},here.length?"No match for that search.":"Nobody is signed in on this project yet."));
+    if(!f.length) wrap.append(h("div",{class:"empty"},lite()&&S.liteOpen.loading&&!S.liteOpen.at?"Loading...":here.length?"No match for that search.":"Nobody is signed in on this project yet."));
     box.append(wrap);
   }
   draw();
   pane.append(h("div",{class:"row",style:"justify-content:space-between"},h("h2",null,"Leaving site?"),h("span",{class:"muted small",text:here.length+" on site"})),
-    h("div",{class:"muted small"},"Find your name, tap it and confirm your time out."),q,box);
+    h("div",{class:"muted small"},"Find your name, tap it and confirm your time out."),q,box,
+    lite()?h("div",{class:"row",style:"margin-top:10px"},h("button",{class:"btn sm",onclick:()=>fetchLiteOpen(true)},"Refresh list")):null);
 }
 
 /* ---------- On site (today list) ---------- */
@@ -1214,6 +1234,7 @@ function subscribeAtt(){
   S.att=[]; S.loaded.att=false;
   if(!S.db) return;
   if(S.unsubSigs){S.unsubSigs();S.unsubSigs=null;} S.sigs={};
+  if(lite()){ S.loaded.att=true; return; }
   if(S.isAdmin||S.isSuper) S.unsubSigs=S.db.collection("sigs").where("date","==",S.date).onSnapshot(snap=>{
     const m={}; snap.docs.forEach(d=>{m[d.id]=d.data().sig;}); S.sigs=m; render(true);
   },()=>{});
@@ -1227,7 +1248,7 @@ function subscribe(){
   S.connectTimer=setTimeout(()=>{S.reachable=false;render(true);},10000);
   S.db.collection("roster").onSnapshot(snap=>{
     S.roster=snap.docs.map(d=>({...d.data(),id:d.id})).sort((a,b)=>(a.order||999)-(b.order||999)||a.name.localeCompare(b.name));
-    S.loaded.roster=true; render(true);
+    S.loaded.roster=true; if(!snap.metadata.fromCache){S.reachable=true;clearTimeout(S.connectTimer);} render(true);
   },()=>{S.reachable=false;render(true);});
   if(S.isAdmin) S.db.collection("members").onSnapshot(snap=>{
     S.members=snap.docs.map(d=>({id:d.id,role:d.data().role,reports:d.data().reports})); render(true);
