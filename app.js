@@ -112,6 +112,12 @@ function cmpName(a,b){
   if(S.sortBy==="last") return x[1].localeCompare(y[1])||x[0].localeCompare(y[0]);
   return cmpTime(a.timeIn,b.timeIn)||a.name.localeCompare(b.name);
 }
+const discOf = r => { const t = String(r || '').trim(); if (!t) return 'Not set'; if (/^(SPK|SPOT|SPOTTER|SP|SPE)\??$/i.test(t)) return 'Spotter'; return t.length <= 3 ? t.toUpperCase() : t.charAt(0).toUpperCase() + t.slice(1); };
+const discCounts = rows => { const m = new Map(); rows.forEach(r => { const k = discOf(r.role); m.set(k, (m.get(k) || 0) + 1); }); return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); };
+function absentGroups(){
+  const seen=new Set(S.att.map(a=>a.companyId+"|"+a.personId));
+  return S.roster.map(c=>({id:c.id,name:c.name,people:(c.people||[]).filter(p=>!seen.has(c.id+"|"+p.id)).map(p=>({name:fullName(p),r:p.r||"",num:p.n?String(p.n):""})).sort((a,b)=>a.name.localeCompare(b.name))})).filter(g=>g.people.length);
+}
 function groupByCompany(rows){
   const m=new Map();
   rows.forEach(r=>{const k=r.company||"Other";if(!m.has(k))m.set(k,[]);m.get(k).push(r);});
@@ -525,6 +531,7 @@ async function makePdfBytes(){
   const doc=await PDFDocument.create();
   const fR=await doc.embedFont(StandardFonts.Helvetica), fB=await doc.embedFont(StandardFonts.HelveticaBold);
   const MM=72/25.4, PW=210, PH=297;
+  const absentData=S.roster.length?absentGroups():[];
   let teamsData=null;
   if(viewId()!=="all"&&S.db){ try{ const sn=await S.db.doc("config/alloc-"+viewId()+"-"+S.date).get(); if(sn&&sn.exists&&sn.data&&Array.isArray(sn.data().groups)&&sn.data().groups.length) teamsData=sn.data().groups; }catch(e){} }
   const rows=att(), v=viewId(), showProj=v==="all", hasArea=rows.some(r=>r.area), hasNum=rows.some(r=>numOf(r));
@@ -555,6 +562,7 @@ async function makePdfBytes(){
   const inN=rows.filter(r=>!r.timeOut).length, groups=groupByCompany(rows);
   txt("Signed in: "+rows.length+"      "+(S.date<S.today?"No time out: ":"On site now: ")+inN+"      Signed out: "+(rows.length-inN)+"      Companies: "+groups.length,M,y,10,true,INK);
   y+=6;
+  const dc=discCounts(rows); if(dc.length){ txt('By discipline:  '+dc.map(([k,n])=>k+' '+n).join('   |   '),M,y,8.5,false,GREY); y+=5; }
   const colHead=()=>{rect(M,y,W,7,PALE);cols.forEach((c,i)=>txt(c.t.toUpperCase(),xs[i]+1.5,y+4.8,8.5,true,GREY));y+=7;};
   const groupHead=(g,cont)=>{
     rect(M,y,W,8,INK); rect(M,y+8,W,0.7,RED);
@@ -628,6 +636,32 @@ async function makePdfBytes(){
       loose.forEach(r => trow(r.name, r.company, numOf(r), r.timeIn || '', r.timeOut || '-', false, !r.timeOut));
     }
   }
+
+  /* not signed in page */
+  if (absentData && absentData.length) {
+    const total = absentData.reduce((n, g) => n + g.people.length, 0);
+    const npg = () => { pg = doc.addPage([PW * MM, PH * MM]); y = M; };
+    npg();
+    txt('NOT SIGNED IN', M, y + 6, 16, true, INK); y += 9;
+    txt(total + ' people on the company lists have not signed in on any project   |   ' + dayName(S.date) + ' ' + dateLong(S.date), M, y + 3, 9.5, false, GREY); y += 6; hline(M, M + W, y, RED, 2.2); y += 6;
+    const AR = 7;
+    const ahead = (g, cont) => {
+      rect(M, y, W, 8, INK); rect(M, y + 8, W, 0.7, RED);
+      txt(g.name.toUpperCase() + (cont ? '  (continued)' : ''), M + 2, y + 5.6, 11, true, WHITE); txt(g.people.length + ' not signed in', M + W - 2, y + 5.5, 9, false, WHITE, true); y += 8.7;
+      rect(M, y, W, 6, PALE); txt('NAME', M + 1.5, y + 4.2, 8, true, GREY); txt('ROLE', M + 104, y + 4.2, 8, true, GREY); txt('NO.', M + 150, y + 4.2, 8, true, GREY); y += 6;
+    };
+    absentData.forEach(g => {
+      if (y + 8.7 + 6 + AR * 2 > PH - 16) npg();
+      ahead(g, false);
+      g.people.forEach(p => {
+        if (y + AR > PH - 16) { npg(); ahead(g, true); }
+        txt(fit(p.name, 100), M + 1.5, y + 5, 9.5, false, INK); txt(fit(p.r || '', 44), M + 104, y + 5, 9.5, false, INK); txt(fit(p.num || '', 26), M + 150, y + 5, 9.5, false, INK);
+        hline(M, M + W, y + AR, LINE, 0.6); y += AR;
+      });
+      y += 5;
+    });
+  }
+
   const pages=doc.getPages();
   pages.forEach((p,i)=>{pg=p;txt("Okee Electrics  |  Site Sign-In",M,PH-8,8,false,GREY);txt("Page "+(i+1)+" of "+pages.length+"  |  Created "+nowHM(),M+W,PH-8,8,false,GREY,true);});
   return await doc.save();
@@ -691,11 +725,16 @@ function renderSummary(){
       const gi=g.rows.filter(r=>!r.timeOut).length, go=g.rows.length-gi;
       const ins=g.rows.map(r=>r.timeIn).sort()[0];
       bars.append(h("div",{class:"bar"},
-        h("div",null,h("div",{class:"nm",text:g.name}),h("div",{class:"muted small",text:"First in "+ins})),
+        h("div",null,h("div",{class:"nm",text:g.name}),h("div",{class:"muted small",text:"First in "+ins}),h("div",{class:"muted small",text:discCounts(g.rows).map(([k,n])=>k+" "+n).join(" · ")})),
         h("div",{class:"track",role:"img","aria-label":g.name+": "+gi+" on site, "+go+" signed out"},
           h("div",{class:"seg-in",style:"width:"+(gi/max*100)+"%"}),h("div",{class:"seg-out",style:"width:"+(go/max*100)+"%"})),
         h("div",{class:"n",text:g.rows.length})));
     });
+    const dBars=h("div",{class:"bars"}); const dAll=discCounts(rows); const dMax=Math.max(...dAll.map(x=>x[1]));
+    dAll.forEach(([k,n])=>{ const inD=rows.filter(r=>discOf(r.role)===k&&!r.timeOut).length;
+      dBars.append(h("div",{class:"bar"},h("div",null,h("div",{class:"nm",text:k}),h("div",{class:"muted small",text:inD+(S.date<S.today?" no time out":" on site now")})),
+        h("div",{class:"track",role:"img","aria-label":k+": "+n},h("div",{class:"seg-in",style:"width:"+(n/dMax*100)+"%"})),h("div",{class:"n",text:n}))); });
+    pane.append(h("div",{class:"card pad",style:"display:grid;gap:12px"},h("h3",null,"By discipline"),dBars));
     pane.append(h("div",{class:"card pad",style:"display:grid;gap:12px"},
       h("h3",null,"By contractor"),bars,
       h("div",{class:"legend"},h("span",null,h("i",{style:"background:var(--good)"}),S.date<S.today?"No time out":"On site"),h("span",null,h("i",{style:"background:var(--muted);opacity:.55"}),"Signed out"))));
@@ -715,6 +754,15 @@ function renderSummary(){
       h("div",{class:"seg",role:"group","aria-label":"Sort names by"},...[["time","Time in"],["first","First name"],["last","Surname"]].map(([id,label])=>
         h("button",{"aria-pressed":String(S.sortBy===id),onclick:()=>{S.sortBy=id;render();safeWrite(()=>S.db.doc("config/report").set({sort:id}));}},label)))));
     pane.append(act);
+  }
+  const ab=absentGroups();
+  if(S.roster.length){
+    const tot=ab.reduce((n,g)=>n+g.people.length,0);
+    const card=h("div",{class:"card group"},h("div",{class:"grouphead",style:"background:var(--muted,#5b6770)"},h("h3",null,"Not signed in"),h("span",null,tot+" on the company lists")));
+    if(!tot) card.append(h("div",{class:"muted small",style:"padding:12px 14px"},"Everyone on the company lists has signed in."));
+    ab.forEach(g=>{ const d=h("details",{style:"border-top:1px solid var(--line)"},h("summary",{style:"padding:12px 14px;cursor:pointer;font-weight:700"},g.name+" ("+g.people.length+")"),
+      h("div",{class:"list"},...g.people.map(p=>h("div",{class:"person"},h("div",{class:"who"},h("div",{class:"nm",text:p.name}),h("div",{class:"meta"},p.r?h("span",{class:"tag",text:p.r}):null,p.num?h("span",{class:"tag",text:"No. "+p.num}):null)))))); card.append(d); });
+    pane.append(card);
   }
 }
 function showText(t){

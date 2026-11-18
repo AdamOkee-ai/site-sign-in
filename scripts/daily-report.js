@@ -57,13 +57,18 @@ async function main() {
   const byProj = new Map();
   rows.forEach(r => { const k = r.project || 'unknown'; if (!byProj.has(k)) byProj.set(k, { id: k, name: r.projectName || k, rows: [] }); byProj.get(k).rows.push(r); });
   const projects = [...byProj.values()].sort((a, b) => (order.indexOf(a.id) < 0 ? 99 : order.indexOf(a.id)) - (order.indexOf(b.id) < 0 ? 99 : order.indexOf(b.id)) || a.name.localeCompare(b.name));
+  // roster people with no sign-in on any project today (uses every project's sign-ins, including ones not sent)
+  const seen = new Set(allRows.map(r => r.companyId + '|' + r.personId));
+  const absent = rosSnap.docs.map(d => ({ id: d.id, order: d.data().order || 999, name: d.data().name || d.id,
+    people: (d.data().people || []).filter(x => !seen.has(d.id + '|' + x.id)).map(x => ({ name: ((x.f || '') + ' ' + (x.l || '')).replace(/\s+/g, ' ').trim(), r: x.r || '', num: x.n ? String(x.n) : '' })).sort((a, b) => a.name.localeCompare(b.name)) }))
+    .filter(g => g.people.length).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
   let logo = null; try { logo = fs.readFileSync(path.join(__dirname, '..', 'icons', 'logo.png')); } catch (e) { /* the PDF works without it */ }
   const created = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
   const files = [];
   for (const p of projects) {
     let teams = null;
     try { const a = await db.collection('si_config').doc('alloc-' + p.id + '-' + date).get(); if (a.exists && Array.isArray(a.data().groups) && a.data().groups.length) teams = a.data().groups; } catch (e) { /* the report works without teams */ }
-    const pdf = await R.makePdf(PDFLib, { rows: p.rows, sigs, projectName: p.name, date, logo, created, people, sortBy, teams });
+    const pdf = await R.makePdf(PDFLib, { rows: p.rows, sigs, projectName: p.name, date, logo, created, people, sortBy, teams, absent });
     // a manual run adds the time to the name, because SharePoint will not overwrite a file that is already there
     const filename = 'site-attendance-' + p.name.replace(/[^A-Za-z0-9_-]+/g, '-') + '-' + date + (manual ? '-rerun-' + created.replace(':', '') : '') + '.pdf';
     files.push({ filename, project: p.name, content: Buffer.from(pdf), url: ownUrl(p.rows[0]) });

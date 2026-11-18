@@ -9,6 +9,9 @@ const parseDate = s => { const [y, m, d] = s.split('-').map(Number); return new 
 const dayName = s => parseDate(s).toLocaleDateString('en-GB', { weekday: 'long' });
 const dateLong = s => parseDate(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
+const discOf = r => { const t = String(r || '').trim(); if (!t) return 'Not set'; if (/^(SPK|SPOT|SPOTTER|SP|SPE)\??$/i.test(t)) return 'Spotter'; return t.length <= 3 ? t.toUpperCase() : t.charAt(0).toUpperCase() + t.slice(1); };
+const discCounts = rows => { const m = new Map(); rows.forEach(r => { const k = discOf(r.role); m.set(k, (m.get(k) || 0) + 1); }); return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); };
+
 function groupByCompany(rows, cmp) {
   const m = new Map();
   rows.forEach(r => { const k = r.company || 'Other'; if (!m.has(k)) m.set(k, []); m.get(k).push(r); });
@@ -55,6 +58,7 @@ async function makePdf(L, o) {
   const inN = rows.filter(r => !r.timeOut).length, groups = groupByCompany(rows, cmp);
   txt('Signed in: ' + rows.length + '      No time out: ' + inN + '      Signed out: ' + (rows.length - inN) + '      Companies: ' + groups.length, M, y, 10, true, INK);
   y += 6;
+  const dc = discCounts(rows); if (dc.length) { txt('By discipline:  ' + dc.map(([k, n]) => k + ' ' + n).join('   |   '), M, y, 8.5, false, GREY); y += 5; }
   const colHead = () => { rect(M, y, W, 7, PALE); cols.forEach((c, i) => txt(c.t.toUpperCase(), xs[i] + 1.5, y + 4.8, 8.5, true, GREY)); y += 7; };
   const groupHead = (g, cont) => {
     rect(M, y, W, 8, INK); rect(M, y + 8, W, 0.7, RED);
@@ -128,9 +132,34 @@ async function makePdf(L, o) {
       loose.forEach(r => trow(r.name, r.company, numOf(r), r.timeIn || '', r.timeOut || '-', false, !r.timeOut));
     }
   }
+
+  /* not signed in page */
+  if (o.absent && o.absent.length) {
+    const total = o.absent.reduce((n, g) => n + g.people.length, 0);
+    const npg = () => { pg = doc.addPage([PW * MM, PH * MM]); y = M; };
+    npg();
+    txt('NOT SIGNED IN', M, y + 6, 16, true, INK); y += 9;
+    txt(total + ' people on the company lists have not signed in on any project   |   ' + dayName(date) + ' ' + dateLong(date), M, y + 3, 9.5, false, GREY); y += 6; hline(M, M + W, y, RED, 2.2); y += 6;
+    const AR = 7;
+    const ahead = (g, cont) => {
+      rect(M, y, W, 8, INK); rect(M, y + 8, W, 0.7, RED);
+      txt(g.name.toUpperCase() + (cont ? '  (continued)' : ''), M + 2, y + 5.6, 11, true, WHITE); txt(g.people.length + ' not signed in', M + W - 2, y + 5.5, 9, false, WHITE, true); y += 8.7;
+      rect(M, y, W, 6, PALE); txt('NAME', M + 1.5, y + 4.2, 8, true, GREY); txt('ROLE', M + 104, y + 4.2, 8, true, GREY); txt('NO.', M + 150, y + 4.2, 8, true, GREY); y += 6;
+    };
+    o.absent.forEach(g => {
+      if (y + 8.7 + 6 + AR * 2 > PH - 16) npg();
+      ahead(g, false);
+      g.people.forEach(p => {
+        if (y + AR > PH - 16) { npg(); ahead(g, true); }
+        txt(fit(p.name, 100), M + 1.5, y + 5, 9.5, false, INK); txt(fit(p.r || '', 44), M + 104, y + 5, 9.5, false, INK); txt(fit(p.num || '', 26), M + 150, y + 5, 9.5, false, INK);
+        hline(M, M + W, y + AR, LINE, 0.6); y += AR;
+      });
+      y += 5;
+    });
+  }
   const pages = doc.getPages();
   pages.forEach((p, i) => { pg = p; txt('Okee Electrics  |  Site Sign-In', M, PH - 8, 8, false, GREY); txt('Page ' + (i + 1) + ' of ' + pages.length + '  |  Created ' + (o.created || ''), M + W, PH - 8, 8, false, GREY, true); });
   return await doc.save();
 }
 
-module.exports = { makePdf, groupByCompany, dayName, dateLong };
+module.exports = { discOf, discCounts, makePdf, groupByCompany, dayName, dateLong };
