@@ -547,20 +547,21 @@ function openRollCall(){
 
 /* ---------- PDF report ---------- */
 function pdfAscii(t){return String(t==null?"":t).normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^\x20-\x7E]/g,"?");}
-async function makePdfBytes(){
+async function makePdfBytes(opt){
+  opt=Object.assign({group:true,teams:true,absent:true,disc:true},opt||{});
   const L=window.PDFLib; if(!L) return null;
   const {PDFDocument,StandardFonts,rgb}=L;
   const doc=await PDFDocument.create();
   const fR=await doc.embedFont(StandardFonts.Helvetica), fB=await doc.embedFont(StandardFonts.HelveticaBold);
   const MM=72/25.4, PW=210, PH=297;
-  const absentData=S.roster.length?absentGroups():[];
+  const absentData=(opt.absent&&S.roster.length)?absentGroups():[];
   let teamsData=null;
-  if(viewId()!=="all"&&S.db){ try{ const sn=await S.db.doc("config/alloc-"+viewId()+"-"+S.date).get(); if(sn&&sn.exists&&sn.data&&Array.isArray(sn.data().groups)&&sn.data().groups.length) teamsData=sn.data().groups; }catch(e){} }
+  if(opt.teams&&viewId()!=="all"&&S.db){ try{ const sn=await S.db.doc("config/alloc-"+viewId()+"-"+S.date).get(); if(sn&&sn.exists&&sn.data&&Array.isArray(sn.data().groups)&&sn.data().groups.length) teamsData=sn.data().groups; }catch(e){} }
   const rows=att(), v=viewId(), showProj=v==="all", hasArea=rows.some(r=>r.area), hasNum=rows.some(r=>numOf(r));
   const M=14,W=PW-2*M,RH=11;
   const C=(a)=>rgb(a[0]/255,a[1]/255,a[2]/255);
   const INK=[20,23,27],RED=[225,16,10],GREY=[90,98,108],LINE=[211,216,222],WHITE=[255,255,255],PALE=[238,240,243];
-  const cols=[{k:"name",t:"Name",w:0}].concat(hasNum?[{k:"num",t:"No.",w:12}]:[]).concat([{k:"role",t:"Role",w:20}]).concat(hasArea?[{k:"area",t:"Area",w:22}]:[]).concat(showProj?[{k:"proj",t:"Project",w:18}]:[]).concat([{k:"in",t:"In",w:14},{k:"out",t:"Out",w:14},{k:"sig",t:"Signature",w:30}]);
+  const cols=[{k:"name",t:"Name",w:0}].concat(hasNum?[{k:"num",t:"No.",w:12}]:[]).concat(opt.group?[]:[{k:"co",t:"Company",w:30}]).concat([{k:"role",t:"Role",w:20}]).concat(hasArea?[{k:"area",t:"Area",w:22}]:[]).concat(showProj?[{k:"proj",t:"Project",w:18}]:[]).concat([{k:"in",t:"In",w:14},{k:"out",t:"Out",w:14},{k:"sig",t:"Signature",w:30}]);
   cols[0].w=W-cols.reduce((n,c)=>n+c.w,0);
   const xs=[];let xx=M;cols.forEach(c=>{xs.push(xx);xx+=c.w;});
   let pg=doc.addPage([PW*MM,PH*MM]), y=M;
@@ -581,10 +582,11 @@ async function makePdfBytes(){
   txt("DAILY SITE ATTENDANCE RECORD",M+16,y+6,16,true,INK);
   txt((v==="all"?"All projects":projName(v))+"   |   "+dayName(S.date)+" "+dateLong(S.date),M+16,y+12.5,10.5,false,GREY);
   y+=19; hline(M,M+W,y,RED,2.2); y+=7;
-  const inN=rows.filter(r=>!r.timeOut).length, groups=groupByCompany(rows);
-  txt("Signed in: "+rows.length+"      "+(S.date<S.today?"No time out: ":"On site now: ")+inN+"      Signed out: "+(rows.length-inN)+"      Companies: "+groups.length,M,y,10,true,INK);
+  let inN=rows.filter(r=>!r.timeOut).length, groups=groupByCompany(rows); const nCo=groups.length;
+  if(!opt.group) groups=[{name:"All companies",rows:rows.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name)))}];
+  txt("Signed in: "+rows.length+"      "+(S.date<S.today?"No time out: ":"On site now: ")+inN+"      Signed out: "+(rows.length-inN)+"      Companies: "+nCo,M,y,10,true,INK);
   y+=6;
-  const dc=discCounts(rows); if(dc.length){ txt('By discipline:  '+dc.map(([k,n])=>k+' '+n).join('   |   '),M,y,8.5,false,GREY); y+=5; }
+  const dc=opt.disc?discCounts(rows):[]; if(dc.length){ txt('By discipline:  '+dc.map(([k,n])=>k+' '+n).join('   |   '),M,y,8.5,false,GREY); y+=5; }
   const colHead=()=>{rect(M,y,W,7,PALE);cols.forEach((c,i)=>txt(c.t.toUpperCase(),xs[i]+1.5,y+4.8,8.5,true,GREY));y+=7;};
   const groupHead=(g,cont)=>{
     rect(M,y,W,8,INK); rect(M,y+8,W,0.7,RED);
@@ -608,7 +610,7 @@ async function makePdfBytes(){
     g.rows.forEach(r=>{
       if(y+RH>PH-16){pg=doc.addPage([PW*MM,PH*MM]);y=M;groupHead(g,true);}
       if(r.walkIn) anyWalk=true;
-      const vals={name:fit(r.name+(r.walkIn?" *":""),cols[0].w),num:fit(numOf(r),12),role:fit(r.role||"",20),area:fit(r.area||"",22),proj:fit(r.projectName||projName(r.project),18),in:r.timeIn||"",out:r.timeOut||"-"};
+      const vals={name:fit(r.name+(r.walkIn?" *":""),cols[0].w),num:fit(numOf(r),12),co:fit(r.company||"",30),role:fit(r.role||"",20),area:fit(r.area||"",22),proj:fit(r.projectName||projName(r.project),18),in:r.timeIn||"",out:r.timeOut||"-"};
       cols.forEach((c,i)=>{ if(c.k!=="sig") txt(vals[c.k],xs[i]+1.5,y+6.6,9.5,false,(c.k==="out"&&!r.timeOut)?RED:INK); });
       const si=cols.length-1; sigDraw(S.sigs[r._id],xs[si]+1.5,y+1,cols[si].w-3,RH-2);
       hline(M,M+W,y+RH,LINE,0.6); y+=RH;
@@ -687,6 +689,26 @@ async function makePdfBytes(){
   const pages=doc.getPages();
   pages.forEach((p,i)=>{pg=p;txt("Okee Electrics  |  Site Sign-In",M,PH-8,8,false,GREY);txt("Page "+(i+1)+" of "+pages.length+"  |  Created "+nowHM(),M+W,PH-8,8,false,GREY,true);});
   return await doc.save();
+}
+function askPdfOptions(){
+  return new Promise(res=>{
+    let saved={}; try{saved=JSON.parse(localStorage.getItem("si.pdfopts")||"{}");}catch(e){}
+    const o=Object.assign({group:true,teams:true,absent:true,disc:true},saved);
+    let done=false; const fin=v=>{ if(done) return; done=true; res(v); };
+    const items=[["group","Group by company","Off = one list of everyone with a Company column"],["disc","Discipline counts","The 'By discipline' line at the top"],["teams","Teams and areas page","Only when teams are set up for the day"],["absent","Not signed in page","People on the company lists who have not signed in"]];
+    const boxes={};
+    const close=openSheet((sheet,close)=>{
+      sheet.append(h("h2",null,"Create PDF",h("small",null,"Choose what to include in the report.")));
+      items.forEach(([k,t,d])=>{
+        const cb=h("input",{type:"checkbox",id:"po-"+k}); cb.checked=!!o[k]; boxes[k]=cb;
+        sheet.append(h("label",{style:"display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line,#ddd)",for:"po-"+k},cb,h("span",null,h("div",{style:"font-weight:600"},t),h("div",{class:"muted small"},d))));
+      });
+      sheet.append(h("div",{class:"row end",style:"margin-top:14px"},
+        h("button",{class:"btn",onclick:()=>{close();fin(null);}},"Cancel"),
+        h("button",{class:"btn primary",onclick:()=>{const v={}; items.forEach(([k])=>v[k]=boxes[k].checked); try{localStorage.setItem("si.pdfopts",JSON.stringify(v));}catch(e){} close(); fin(v);}},"Create PDF")));
+    });
+    document.addEventListener("pointerdown",function f(e){ if(done){document.removeEventListener("pointerdown",f);return;} if(e.target&&e.target.classList&&e.target.classList.contains("scrim")){ fin(null); } },true);
+  });
 }
 function summaryText(){
   const rows=att(); const lines=[];
@@ -781,7 +803,8 @@ function renderSummary(){
         try{await navigator.clipboard.writeText(summaryText());toast("Report copied");}
         catch(e){showText(summaryText());}}},"Copy report"),
       S.downloads?h("button",{class:"btn",onclick:async()=>{
-        let blob=null; try{blob=await makePdfBytes();}catch(e){console.error(e);}
+        const opt=await askPdfOptions(); if(!opt) return;
+        let blob=null; try{blob=await makePdfBytes(opt);}catch(e){console.error(e);}
         if(!blob){toast("PDF is not available right now.");return;}
         try{await S.downloads.save({filename:"site-attendance-"+(viewId()==="all"?"all":projName(viewId()))+"-"+S.date+".pdf",data:blob});toast("PDF ready");}
         catch(e){if(!e||e.code!=="declined")toast("Could not create the PDF.");}}},"Download PDF"):null,
