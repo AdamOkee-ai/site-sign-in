@@ -171,7 +171,18 @@ function sigPad(){
     el:wrap,
     clear(){strokes.length=0;hint.hidden=false;redraw();},
     isValid(){return strokes.reduce((n,s)=>n+s.length,0)>=6;},
-    value(){return JSON.stringify(strokes);}
+    value(){
+      /* The database rejects signatures over 20000 characters (a heavy scribble can reach that): thin the points out until it fits */
+      let st=strokes.map(x=>x.slice()), out=JSON.stringify(st), n=0;
+      while(out.length>14000&&n++<8){
+        st=st.map(x=>x.length<=3?x:x.filter((_,i)=>i===0||i===x.length-1||i%2===0));
+        out=JSON.stringify(st);
+      }
+      if(out.length>19000){ /* last resort: keep the first strokes only */
+        let k=st.length; while(k>1&&JSON.stringify(st.slice(0,k)).length>19000)k--; out=JSON.stringify(st.slice(0,k));
+      }
+      return out;
+    }
   };
 }
 
